@@ -17,12 +17,37 @@ routing block (Stomp: one path of 8), 8 snapshots (3), 8+ footswitches (3),
 4 send/returns (1). Slot geometry lives in `next_gen_slot_parser.py`.
 
 ### Capture matrix for preset data
-All eight setlists are captured (`tests/fixtures/lt_setlist*.jsonl`). Still
-missing, and needed before the parsing work above: presets with 1 / 8 / 16
-blocks, a split path, all footswitches assigned, an empty preset.
+All eight setlists are captured (`tests/fixtures/lt_setlist*.jsonl`), plus 14
+preset-data captures from setlist 2 (`tests/fixtures/presets/`), recorded
+2026-08-22 by MIDI PC within one session. All 14 verified distinct.
 
-**These need the active preset changed on the device — a write to its state.
-Ask before recording them.**
+Still missing, and **not obtainable by selecting presets alone**:
+
+- **Known block counts (1 / 8 / 16).** Block count cannot be determined from a
+  capture without the parser, so the recorded spread is uncharacterised. The
+  quickest way through: name presets whose block counts you already know (from
+  HX Edit), and capture those specifically.
+- **An empty preset.** Setlist 2 is fully populated. Setlists 1 and 3–6 have
+  "New Preset" at slot 127, but MIDI PC only moves within the device's *active*
+  setlist, so the device has to be switched to one of those first.
+- **A split path** and **all footswitches assigned** — same problem: no way to
+  confirm from the raw capture which presets have them.
+
+### Leads from the preset-data captures
+Observations from an ASCII scan of the 14 captures, not from a parser:
+
+- Effect **block names appear as plain ASCII** (`Courtesan Flange`,
+  `Scream 808`, `Tycoctavia Fuzz`, `10 Band Graphic`, `6 Switch Looper`).
+  Best entry point for the block parser.
+- **Snapshot labels** appear the same way (`SNAPSHOT 1` … `SNAPSHOT 8`).
+- **IR/cab references** appear as `!` + 32 hex chars; presets carrying them are
+  ~9.6KB against ~7.4KB for those without.
+- **The preset name is *not* in the preset-data stream** — not as a `0x6D`
+  string and not as raw ASCII. Don't go looking for it there.
+- Matching `modules.py` 3-byte `cdXXXX` ids against the raw stream **does not
+  work** — ~50 false hits per capture, near-identical across every preset.
+  Chance collisions dominate at that pattern length; the ids must need
+  surrounding framing to locate.
 
 ### Extend the replay harness to RequestPreset
 `tests/replay.py` hardcodes `RequestPresetNames`. Preset-data fixtures need an
