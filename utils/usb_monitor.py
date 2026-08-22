@@ -80,7 +80,8 @@ class UsbMonitor:
             time.sleep(self.POLLING_INTERVAL_IN_SEC)
 
     def start(self):
-        self.monitor_thread = threading.Thread(target=self.monitor, args=())
+        # Daemon: polling must never keep the process alive after shutdown.
+        self.monitor_thread = threading.Thread(target=self.monitor, args=(), daemon=True)
         self.monitor_thread.start()
 
     def register_device_found_cb(self, cb):

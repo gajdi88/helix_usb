@@ -113,6 +113,14 @@ those came from before duplicating that work.
   Do not call rename / footswitch-label / write functions without asking —
   there is no Linux backup path, only HX Edit in a Windows VM.
 - Only one process can hold the device. Close the DAW before testing.
+- **`helix_qt_ui.py` is a Qt GUI with no exit path — never run it directly, it
+  will hang the session.** Always bound it and capture the output:
+
+  ```
+  timeout 10 .venv/bin/python helix_qt_ui.py 2>&1 | tee /tmp/helix.log
+  ```
+
+  then read `/tmp/helix.log`. Note `.venv/bin/python`, not bare `python`.
 - Prefer fixtures to hardware. The goal is a `--record` mode dumping raw
   `0x81` packets to `.jsonl`, and parser tests running against those, so
   iteration needs no LT attached. Capture matrix worth recording: each
@@ -121,7 +129,37 @@ those came from before duplicating that work.
 - Lock in current behaviour with a fixture test before refactoring. 128 names
   from setlist 2 currently parse correctly — that is the regression baseline.
 
+## Process lifecycle and SIGTERM
+
+**SIGTERM is handled (fixed 2026-08-22).** `timeout N python ...` used to kill
+the process outright: `HelixUsb.shutdown()` never ran, USB interfaces were
+never released, and the *next* run then failed — 8 packets, never reaching
+`request_preset_names`. In a sequential sweep this alternates with run order,
+so it looks exactly like "even setlists work, odd ones don't". It is not
+setlist-dependent. Three things were wrong and all three are fixed:
+
+- Neither entry point trapped SIGTERM. `helix_qt_ui.py` now installs handlers
+  for SIGINT/SIGTERM that call `app.quit()`, plus a 200ms no-op `QTimer` —
+  Python signal handlers only run between bytecodes, and nothing executes
+  while `app.exec()` is blocked in C++. `main()` calls `bridge.stop()` in a
+  `finally`, because `app.quit()` delivers no `closeEvent`. `helix_usb.py`
+  registers SIGTERM alongside its existing SIGINT handler.
+- `shutdown()` joined the keep-alive threads with a 1.0s timeout against a
+  1.04s keep-alive cycle, so the join always timed out and
+  `dispose_resources()` ran under a live thread whose next write blocked on a
+  disposed endpoint. Join is now 2.5s and warns if a thread outlives it.
+- The keep-alive, reader and USB-monitor threads were non-daemon, so one stuck
+  in a USB write held the process open. All are now daemon.
+
+Teardown costs ~0.8s and logs `Shutdown complete; USB interfaces released`.
+Note the Qt bridge's own "Shutdown complete" status is emitted *after* the
+event loop stops, so its slot never runs — don't use it as a marker.
+
+Back-to-back runs still want a small gap: **3s is verified good** (it was the
+gap that used to fail every second run), 1s is still too short. 8s if you want
+margin.
+
 ## Verified baseline
 
-`HELIX_SETLIST=2 python helix_qt_ui.py` logs 128 names, indices 0–127, with
+`HELIX_SETLIST=2` (run as above) logs 128 names, indices 0–127, with
 "TwoPrinces" at 25 and "Voice" at 127, and no truncation warning.

@@ -349,7 +349,7 @@ class HelixUsb:
 		except usb.core.USBError as e:
 			log.error('While trying to claim interface')
 
-		self.x81_reader = threading.Thread(target=self.endpoint_listener, args=('0x81', self.endpoint_0x81_bulk_in))
+		self.x81_reader = threading.Thread(target=self.endpoint_listener, args=('0x81', self.endpoint_0x81_bulk_in), daemon=True)
 
 		return 0
 
@@ -550,18 +550,18 @@ class HelixUsb:
 		log.info("Finished x2x10_keep_alive_thread")
 
 	def start_x1x10_keep_alive_thread(self, delay=0.0):
-		self.x1x10_keep_alive_thread = threading.Thread(target=self.x1x10_keep_alive_thread_fct, args=(delay,))
+		self.x1x10_keep_alive_thread = threading.Thread(target=self.x1x10_keep_alive_thread_fct, args=(delay,), daemon=True)
 		self.x1x10_keep_alive_thread.start()
 
 	def start_x2x10_keep_alive_thread(self, delay=0.0):
-		self.x2x10_keep_alive_thread = threading.Thread(target=self.x2x10_keep_alive_thread_fct, args=(delay,))
+		self.x2x10_keep_alive_thread = threading.Thread(target=self.x2x10_keep_alive_thread_fct, args=(delay,), daemon=True)
 		self.x2x10_keep_alive_thread.start()
 
 	def start_x80x10_keep_alive_thread(self, delay=1.0):
 		if self.x80x10_keep_alive_thread is not None:
 			return
 		self.stop_x80x10_communication = False
-		self.x80x10_keep_alive_thread = threading.Thread(target=self.x80x10_keep_alive_thread_fct, args=(delay,))
+		self.x80x10_keep_alive_thread = threading.Thread(target=self.x80x10_keep_alive_thread_fct, args=(delay,), daemon=True)
 		self.x80x10_keep_alive_thread.start()
 
 	def start_keep_alive_messages(self, delay_x80x10=0.3, delay_x1x10=0.3, delayx2_x10=0.7):
@@ -572,9 +572,9 @@ class HelixUsb:
 		self.stop_communication = False
 		self.stop_x80x10_communication = False
 
-		self.x80x10_keep_alive_thread = threading.Thread(target=self.x80x10_keep_alive_thread_fct, args=(delay_x80x10,))
-		self.x1x10_keep_alive_thread = threading.Thread(target=self.x1x10_keep_alive_thread_fct, args=(delay_x1x10,))
-		self.x2x10_keep_alive_thread = threading.Thread(target=self.x2x10_keep_alive_thread_fct, args=(delayx2_x10,))
+		self.x80x10_keep_alive_thread = threading.Thread(target=self.x80x10_keep_alive_thread_fct, args=(delay_x80x10,), daemon=True)
+		self.x1x10_keep_alive_thread = threading.Thread(target=self.x1x10_keep_alive_thread_fct, args=(delay_x1x10,), daemon=True)
+		self.x2x10_keep_alive_thread = threading.Thread(target=self.x2x10_keep_alive_thread_fct, args=(delayx2_x10,), daemon=True)
 
 		self.x80x10_keep_alive_thread.start()
 		self.x1x10_keep_alive_thread.start()
@@ -992,9 +992,14 @@ class HelixUsb:
 			except Exception as e:
 				log.warning('Failed to shutdown active mode: ' + str(e))
 
+		# Longer than the 1.04s keep-alive cycle: the threads must be gone
+		# before USB resources are disposed below, or their next write blocks
+		# on a disposed endpoint.
 		for thread in [self.x81_reader, self.x1x10_keep_alive_thread, self.x2x10_keep_alive_thread, self.x80x10_keep_alive_thread]:
 			if thread is not None and thread.is_alive():
-				thread.join(timeout=1.0)
+				thread.join(timeout=2.5)
+				if thread.is_alive():
+					log.warning('Thread %s did not stop within 2.5s', thread.name)
 
 		if self.excel_logger:
 			self.excel_logger.save()
@@ -1022,6 +1027,11 @@ class HelixUsb:
 				usb.util.dispose_resources(self.usb_device)
 			except usb.core.USBError as e:
 				log.warning('Failed to dispose USB resources: ' + str(e))
+
+		# Logged here rather than by the caller: the Qt UI's own "shutdown
+		# complete" status is a signal emitted after the event loop has
+		# stopped, so its slot never runs and it cannot be relied on.
+		log.info('Shutdown complete; USB interfaces released')
 
 
 def print_usage(p_b_exit=True):
@@ -1095,6 +1105,9 @@ def main(argv):
 	helix_usb.register_preset_no_change_cb_fct(helix_usb.on_preset_change)
 
 	signal.signal(signal.SIGINT, helix_usb.signal_handler)
+	# SIGTERM too, so `timeout N python helix_usb.py ...` tears down cleanly
+	# and releases the USB interfaces instead of being killed outright.
+	signal.signal(signal.SIGTERM, helix_usb.signal_handler)
 
 	# only report Line6 Helix devices
 	usb_monitor = UsbMonitor(['0e41:4246', '0e41:424a', '0e41:5055'])

@@ -1,4 +1,5 @@
 import logging
+import signal
 import sys
 
 from helix_usb import HelixUsb
@@ -180,6 +181,7 @@ class HelixBridge(QObject):
 		self.usb_monitor = None
 		self._last_connected = None
 		self._requested_initial_names = False
+		self._stopped = False
 
 		self.helix.register_preset_names_change_cb_fct(self._on_preset_names)
 		self.helix.register_preset_no_change_cb_fct(self._on_preset_no)
@@ -200,6 +202,11 @@ class HelixBridge(QObject):
 		self.status.emit("USB monitor started; waiting for HX device")
 
 	def stop(self):
+		# Reachable twice: once from closeEvent, once from main()'s finally
+		# after a SIGTERM-driven quit.
+		if self._stopped:
+			return
+		self._stopped = True
 		self.connection_poll.stop()
 		if self.helix is not None:
 			self.helix.shutdown(self.usb_monitor)
@@ -859,6 +866,33 @@ class MainWindow(QMainWindow):
 		self.module_settings_layout.addStretch()
 
 
+def _install_signal_handlers(app):
+	"""Make SIGTERM and SIGINT quit the Qt event loop cleanly.
+
+	`timeout N python helix_qt_ui.py` sends SIGTERM, which without this
+	killed the process outright: HelixUsb.shutdown() never ran, USB
+	interfaces were never released, and the device then failed to serve the
+	next run for several seconds.
+
+	The keep-alive timer exists because Python-level signal handlers only run
+	between bytecodes, and while app.exec() is blocked in C++ no Python
+	executes. Firing a no-op timer periodically gives the interpreter the
+	chance to notice the signal.
+	"""
+	def handler(signum, _frame):
+		log.info('Received %s; shutting down', signal.Signals(signum).name)
+		app.quit()
+
+	for sig in (signal.SIGINT, signal.SIGTERM):
+		signal.signal(sig, handler)
+
+	keep_alive = QTimer()
+	keep_alive.setInterval(200)
+	keep_alive.timeout.connect(lambda: None)
+	keep_alive.start()
+	return keep_alive
+
+
 def main(argv=None):
 	if argv is None:
 		argv = sys.argv
@@ -872,7 +906,17 @@ def main(argv=None):
 	app = QApplication(argv)
 	window = MainWindow()
 	window.show()
-	return app.exec()
+
+	# Held in a local so the timer is not garbage collected mid-run.
+	_keep_alive = _install_signal_handlers(app)
+
+	try:
+		return app.exec()
+	finally:
+		# app.quit() does not deliver closeEvent, so the teardown that the
+		# window would have done has to happen here too. Bridge.stop() is
+		# idempotent, so the normal window-close path is unaffected.
+		window.bridge.stop()
 
 
 if __name__ == '__main__':
