@@ -88,7 +88,8 @@ Fixing the matcher fixed the plural mode by side effect.
 `utils/preset_parser.py::extract_footswitch_sections` does
 `data.index('0895')` and raises `ValueError` on LT presets — `0895` is an HX
 Stomp marker. This kills `modes/request_preset` in a worker thread on every
-run. It does not affect preset names.
+run. It does not affect preset names. Confirmed still failing on the
+2026-08-22 hardware run: three tracebacks per startup.
 
 This is the **big remaining job**: block/slot and footswitch parsing. The LT
 has two DSP paths with ~16 block positions plus splits/merges and a 1→2
@@ -193,12 +194,31 @@ margin.
 
 ## Verified baseline
 
-`tests/fixtures/synthetic_setlist2.jsonl` is **generated from the wire model in
-this file, not recorded from hardware** (`tests/make_synthetic_capture.py`). It
-locks in current parser behaviour — verified to fail on a fixed 25-byte record
-window, on `expected_preset_name_count = 125`, and on ignoring the `0x81 0xCD`
-index marker — but it cannot confirm the wire model is right. A real capture
-is still owed.
+Nine fixtures, all replayed by the same test:
 
-On hardware, `HELIX_SETLIST=2` (run as above) logs 128 names, indices 0–127,
-with "TwoPrinces" at 25 and "Voice" at 127, and no truncation warning.
+- `tests/fixtures/lt_setlist0.jsonl` … `lt_setlist7.jsonl` — **recorded from
+  the LT** on 2026-08-22, one per setlist, via normal `helix_qt_ui.py`
+  startups. ~150 packets each of full session traffic, not just the name
+  stream. Each `expect` block holds the 128 names the device printed during
+  that live run; replaying each capture reproduces them exactly, 0 mismatches.
+  All eight setlists are full — slot 0 is `US Double Nrm`, `Bentique`,
+  `Run Like`, `Bluesy`, `CleanBrup`, `Litigator Cl2`, `Comf Numb Lead2`,
+  `Quick Start` respectively.
+- `tests/fixtures/synthetic_setlist2.jsonl` — **generated from the wire model
+  in this file, not from hardware** (`tests/make_synthetic_capture.py`). Keeps
+  the short-name, out-of-order and split-record cases covered deterministically.
+
+All nine were verified to go red individually on a fixed 25-byte record window,
+on `expected_preset_name_count = 125`, and on ignoring the `0x81 0xCD` index
+marker.
+
+Live startup on hardware (`HELIX_SETLIST=2`, run as above) reaches
+`request_preset_names` through connect → reconfigure_x1 → request_preset_name
+→ request_preset, logs 128 names with "Run Like" at 0, "TwoPrinces" at 25 and
+"Voice" at 127, and no truncation warning.
+
+Expected noise in that log, all pre-existing and none of it affecting names:
+`Errno 16` claiming interface 3.1 (audio in use), two `Errno 32` pipe errors
+reading strings 9/10, one `No x1x10/x2x10 response!` pair at teardown, and
+three `ValueError: substring not found` tracebacks from the known-broken
+footswitch parser above.
