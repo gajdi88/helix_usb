@@ -57,3 +57,6 @@ Thumbs.db
 *.bak
 patch_lt*.py
 parse_names.py
+
+# ad-hoc packet captures in the repo root (fixtures live in tests/fixtures)
+/*.jsonl

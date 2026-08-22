@@ -121,13 +121,26 @@ those came from before duplicating that work.
   ```
 
   then read `/tmp/helix.log`. Note `.venv/bin/python`, not bare `python`.
-- Prefer fixtures to hardware. The goal is a `--record` mode dumping raw
-  `0x81` packets to `.jsonl`, and parser tests running against those, so
-  iteration needs no LT attached. Capture matrix worth recording: each
-  setlist; presets with 1 / 8 / 16 blocks; a split path; all footswitches
-  assigned; an empty preset.
+- Prefer fixtures to hardware. `--record` exists now — see **Non-interactive
+  testing** below.
 - Lock in current behaviour with a fixture test before refactoring. 128 names
   from setlist 2 currently parse correctly — that is the regression baseline.
+
+## Non-interactive testing
+
+Recording (needs the LT attached, DAW closed). `HELIX_RECORD` writes every
+inbound packet verbatim — 16-byte transport header included — to a `.jsonl`:
+
+```
+HELIX_SETLIST=2 HELIX_RECORD=tests/fixtures/lt_setlist2.jsonl \
+  timeout 10 .venv/bin/python helix_qt_ui.py 2>&1 | tee /tmp/helix.log
+```
+
+`helix_usb.py` also takes `-r <file.jsonl>`. Lines are flushed as they are
+written, so a `timeout` SIGTERM does not lose the capture.
+
+Capture matrix worth recording: each setlist; presets with 1 / 8 / 16 blocks;
+a split path; all footswitches assigned; an empty preset.
 
 ## Process lifecycle and SIGTERM
 

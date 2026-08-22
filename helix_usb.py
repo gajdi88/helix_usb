@@ -1,3 +1,4 @@
+import os
 import sys
 import signal
 import usb.core
@@ -5,6 +6,7 @@ import usb.util
 import threading
 import time
 from utils.usb_monitor import UsbMonitor
+from utils.packet_recorder import PacketRecorder
 import struct
 import binascii
 from utils.formatter import ca_splitter
@@ -167,6 +169,7 @@ class HelixUsb:
 		self.snapshot_change_cb_fct_list = list()
 
 		self.excel_logger = None
+		self.packet_recorder = None
 		self.usb_monitor = None
 		self.shutdown_done = False
 
@@ -175,11 +178,30 @@ class HelixUsb:
 		# Modes
 		self.request_preset_mode = RequestPreset(self)
 
+		# Recording is driven by an env var so that it works for every entry
+		# point, helix_qt_ui.py included. helix_usb.py's -r overrides it.
+		self.set_packet_recorder(os.environ.get('HELIX_RECORD'))
+
 	def set_excel_logger(self, excel_log_path):
 		if excel_log_path:
 			self.excel_logger = ExcelLogger(excel_log_path)
 		else:
 			self.excel_logger = None
+
+	def set_packet_recorder(self, capture_path):
+		if self.packet_recorder is not None:
+			self.packet_recorder.close()
+			self.packet_recorder = None
+
+		if not capture_path:
+			return
+
+		meta = {'setlist': os.environ.get('HELIX_SETLIST', '0')}
+		try:
+			self.packet_recorder = PacketRecorder(capture_path, meta=meta)
+		except OSError as e:
+			log.error('Failed to open packet capture %s: %s', capture_path, str(e))
+			self.packet_recorder = None
 
 	def switch_callback(self, id, val):
 		log.info('switch: ' + str(id) + ', value: ' + str(val))
@@ -726,6 +748,11 @@ class HelixUsb:
 		self.endpoint_0x1_bulk_out.write(data)
 
 	def data_in(self, endpoint_id, data):
+		# Record before dispatch, so a capture holds the raw stream even when
+		# the active mode goes on to raise on it.
+		if self.packet_recorder:
+			self.packet_recorder.record(endpoint_id, data)
+
 		if endpoint_id == '0x81':
 			if self.excel_logger:
 				self.excel_logger.log(data)
@@ -1004,6 +1031,10 @@ class HelixUsb:
 		if self.excel_logger:
 			self.excel_logger.save()
 
+		if self.packet_recorder:
+			self.packet_recorder.close()
+			self.packet_recorder = None
+
 		if self.usb_device is not None:
 			if self.interface_4 is not None and self.midi_interface_claimed:
 				try:
@@ -1048,6 +1079,8 @@ def print_usage(p_b_exit=True):
 	print("Options:")
 	print('\t-h\t\tShow this help text and exit')
 	print('\t-x <file.xlsx>\tDump session traffic to an Excel file (logged while running)')
+	print('\t-r <file.jsonl>\tRecord raw inbound packets to a .jsonl capture for offline parser tests')
+	print('\t\t\t(or set HELIX_RECORD=<file.jsonl>, which also works for helix_qt_ui.py)')
 	print()
 	print("Interactive commands (at the 'command:' prompt):")
 	print('\t0\tRequest current preset name')
@@ -1084,13 +1117,16 @@ def main(argv):
 		datefmt="%Y-%m-%d %H:%M:%S")
 
 	excel_log_path = None
+	capture_path = None
 	try:
-		opts, args = getopt.getopt(argv[1:], 'x:h', [])
+		opts, args = getopt.getopt(argv[1:], 'x:r:h', ['record='])
 		for opt, arg in opts:
 			if opt in '-h':
 				print_usage()
 			elif opt in '-x':
 				excel_log_path = arg
+			elif opt in ('-r', '--record'):
+				capture_path = arg
 			else:
 				print_usage()
 	except getopt.GetoptError as e:
@@ -1099,6 +1135,8 @@ def main(argv):
 
 	helix_usb = HelixUsb()
 	helix_usb.set_excel_logger(excel_log_path)
+	if capture_path:
+		helix_usb.set_packet_recorder(capture_path)
 	helix_usb.register_preset_name_change_cb_fct(helix_usb.on_preset_name_update)
 	helix_usb.register_slot_data_change_cb_fct(helix_usb.on_slot_update)
 	helix_usb.register_snapshot_change_cb_fct(helix_usb.on_snapshot_change)
