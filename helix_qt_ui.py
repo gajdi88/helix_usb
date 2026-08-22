@@ -61,12 +61,27 @@ except ImportError:
 log = logging.getLogger(__name__)
 
 
+def normalize_preset_names(preset_names):
+	"""Pad or trim an incoming name list to the device's preset count.
+
+	Reads the count from HelixUsb rather than keeping a copy. The UI used to
+	hold its own PRESET_LIST_COUNT, which stayed at the HX Stomp's 125 when
+	the rest of the fork moved to the Helix LT's 128 -- the device sent 128
+	names, HelixUsb stored 128, and the list silently dropped the last three.
+	"""
+	count = HelixUsb.PRESET_LIST_COUNT
+	names = list(preset_names[:count])
+	if len(names) < count:
+		names.extend([HelixUsb.PRESET_PLACEHOLDER_NAME] * (count - len(names)))
+	elif len(preset_names) > count:
+		log.warning('Preset-name list longer than %d; showing the first %d', count, count)
+	return names
+
+
 HX_STOMP_BLOCK_COUNT = 10
 HX_STOMP_INPUT_SLOT_INDEX = 0
 HX_STOMP_OUTPUT_SLOT_INDEX = 9
 HX_STOMP_EFFECT_SLOT_INDICES = [1, 2, 3, 4, 5, 6, 7, 8]
-PRESET_LIST_COUNT = 125
-PRESET_PLACEHOLDER_NAME = "<empty>"
 
 
 COLOR_HEX = {
@@ -603,9 +618,7 @@ class MainWindow(QMainWindow):
 			self.lbl_connection.setStyleSheet("#statusPill { background: #4d3030; border: 1px solid #764242; }")
 
 	def _on_preset_names_changed(self, preset_names):
-		normalized_names = list(preset_names[:PRESET_LIST_COUNT])
-		if len(normalized_names) < PRESET_LIST_COUNT:
-			normalized_names.extend([PRESET_PLACEHOLDER_NAME] * (PRESET_LIST_COUNT - len(normalized_names)))
+		normalized_names = normalize_preset_names(preset_names)
 
 		self.preset_list.clear()
 		for idx, name in enumerate(normalized_names):
