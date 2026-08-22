@@ -3,6 +3,33 @@
 Ideas and known gaps, roughly in priority order. Working notes and confirmed
 protocol facts live in `CLAUDE.md`; this file is for what is *not* done yet.
 
+## In progress — picking up here
+
+Preset-data capture, round 2. The device operator needs to identify presets by
+characteristic, because block count cannot be read out of a capture without
+the parser. **Ask for these, on the device's setlist 3 (wire index 2)**, where
+the existing 14 captures came from:
+
+- fewest blocks (1 if one exists)
+- ~8 blocks (the HX Stomp's maximum — useful comparison point)
+- the most complex preset available (upper bound; most valuable single capture)
+- one using the parallel/split path
+- one with the most footswitches assigned
+
+One preset may cover several rows. Rough counts are fine; the count is the
+point, since it becomes the fixture's ground truth.
+
+Two capture routes: have the operator navigate to each preset and capture
+whatever is loaded (like `sl3_preset127_empty.jsonl` — avoids slot-number
+conversion), or take all five slot numbers and select them over MIDI PC in one
+session (faster, but see the numbering caveat below).
+
+**Open question — bank/letter to slot conversion.** With the device showing
+"32B" the wire reported slot 127. The assumed mapping
+`(bank - 1) * 4 + [A=0, B=1, C=2, D=3]` gives 125, not 127. Settle this before
+converting any operator-supplied bank+letter numbers, or capture the loaded
+preset instead and sidestep it.
+
 ## Next up
 
 ### Block/slot and footswitch parsing — the big one
