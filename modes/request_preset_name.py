@@ -29,22 +29,32 @@ class RequestPresetName(Standard):
         log.error('Didn''t receive current preset''s name. Ending mode ' + self.name + ' without success')
         self.helix_usb.switch_mode()
 
+    @staticmethod
+    def _extract_preset_name(data):
+        """Preset name is tagged 0x6D followed by a length byte of
+        0xA1 + len, then that many bytes of ASCII."""
+        str_base = 0xa1
+        for i in range(len(data) - 1):
+            if data[i] == 0x6d and str_base < data[i + 1] < 0xc0:
+                name_len = data[i + 1] - str_base
+                raw = data[i + 2:i + 2 + name_len]
+                if len(raw) == name_len and all(32 <= b <= 126 for b in raw):
+                    return ''.join(chr(b) for b in raw)
+        return ''
+
     def data_in(self, data_in):
         if self.helix_usb.check_keep_alive_response(data_in):
             return False  # don't print incoming message to console
 
-        elif self.helix_usb.my_byte_cmp(left=data_in[23:], right=[0x0, 0x83, 0x66, 0xcd, "XX", "XX", 0x67, 0x0, 0x68, 0x86, 0x6b, 0xcd, 0x0, 0x0, 0x6c, 0xcd], length=16):
+        # 0x86 and the setlist byte are device/setlist specific on
+        # Helix/LT, so both are wildcards here.
+        elif self.helix_usb.my_byte_cmp(left=data_in[23:], right=[0x0, 0x83, 0x66, 0xcd, "XX", "XX", 0x67, 0x0, 0x68, "XX", 0x6b, 0xcd, 0x0, "XX", 0x6c, 0xcd], length=16):
             # self.helix_usb.log_data_in(data_in)
             for b in data_in[16:]:
                 self.preset_name_data.append(b)
 
             if data_in[1] == 0x0:
-                slot_number_idx = 27
-                preset_name = ''
-                for i in range(slot_number_idx, slot_number_idx + 24):
-                    if self.preset_name_data[i] == 0x00:
-                        break
-                    preset_name += chr(self.preset_name_data[i])
+                preset_name = self._extract_preset_name(self.preset_name_data)
 
                 # log.info("*************************** Preset Name: " + preset_name)
                 self.helix_usb.set_preset_name(preset_name)

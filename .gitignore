@@ -53,3 +53,7 @@ Thumbs.db
 
 # excel dump of last helix_ubs session
 *.xlsx
+.venv/
+*.bak
+patch_lt*.py
+parse_names.py

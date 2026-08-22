@@ -1,6 +1,7 @@
 from modes.standard import Standard
 from out_packet import OutPacket
 import logging
+import os
 import threading
 log = logging.getLogger(__name__)
 
@@ -14,7 +15,13 @@ class RequestPresetNames(Standard):
 		self.decoded_preset_names = []
 		self.decoded_preset_names_by_index = {}
 		self.decoded_preset_names_fallback = []
-		self.expected_preset_name_count = 125
+		# One Helix/LT setlist holds 128 presets (32 banks x 4).
+		self.expected_preset_name_count = 128
+		# Which setlist to enumerate (0-7). Override with HELIX_SETLIST.
+		try:
+			self.setlist = int(os.environ.get('HELIX_SETLIST', '0')) & 0x7
+		except ValueError:
+			self.setlist = 0
 		self.idle_watchdog_timer = None
 		self.transfer_complete = False
 		self.preset_name_placeholder = "<empty>"
@@ -30,7 +37,7 @@ class RequestPresetNames(Standard):
 		self.transfer_complete = False
 		self._cancel_idle_watchdog()
 		data = [0x1d, 0x0, 0x0, 0x18, 0x1, 0x10, 0xef, 0x3, 0x0, "XX", 0x0, 0xc, 0x38, 0x10, 0x0, 0x0, 0x1, 0x0, 0x2,
-				0x0, 0xd, 0x0, 0x0, 0x0, 0x83, 0x66, 0xcd, 0x3, 0xea, 0x64, 0x1, 0x65, 0x82, 0x6b, 0x0, 0x65, 0x2, 0x0,
+				0x0, 0xd, 0x0, 0x0, 0x0, 0x83, 0x66, 0xcd, 0x3, 0xea, 0x64, 0x1, 0x65, 0x82, 0x6b, self.setlist, 0x65, 0x2, 0x0,
 				0x0, 0x0]
 		# data = [0x19, 0x0, 0x0, 0x18, 0x1, 0x10, 0xef, 0x3, 0x0, "XX", 0x0, 0x4, 0x1a, 0x10, 0x0, 0x0, 0x1, 0x0, 0x2, 0x0, 0x9, 0x0, 0x0, 0x0, 0x83, 0x66, 0xcd, 0x3, 0xe9, 0x64, 0x0, 0x65, 0xc0, 0x0, 0x0, 0x0]
 		# data = [0x1a, 0x0, 0x0, 0x18, 0x1, 0x10, 0xef, 0x3, 0x0, "XX", 0x0, 0x4, 0x9, 0x10, 0x0, 0x0, 0x1, 0x0, 0x2, 0x0, 0xa, 0x0, 0x0, 0x0, 0x83, 0x66, 0xcd, 0x3, 0xe8, 0x64, 0xcc, 0xfe, 0x65, 0x80, 0x0, 0x0]
@@ -48,7 +55,7 @@ class RequestPresetNames(Standard):
 
 	def _arm_idle_watchdog(self):
 		self._cancel_idle_watchdog()
-		self.idle_watchdog_timer = threading.Timer(0.75, self._on_idle_watchdog_timeout)
+		self.idle_watchdog_timer = threading.Timer(2.0, self._on_idle_watchdog_timeout)
 		self.idle_watchdog_timer.start()
 
 	def _on_idle_watchdog_timeout(self):
@@ -73,22 +80,14 @@ class RequestPresetNames(Standard):
 		self.helix_usb.switch_mode()
 
 	def _extract_record_preset_index(self, record):
-		if len(record) < 9:
+		"""Preset index sits immediately after the 0x81 0xCD marker as a
+		16-bit big-endian value. It is absolute across the whole device
+		(setlist * 128 + slot), so rebase onto the requested setlist.
+		(HX Stomp used 0x6b/0x6c bank arithmetic; Helix/LT does not.)"""
+		if len(record) < 4 or record[0] != 0x81 or record[1] != 0xcd:
 			return None
-
-		metadata = record[3:9]
-		idx_6b = -1
-		idx_6c = -1
-		for i, b in enumerate(metadata):
-			if b == 0x6b and i + 1 < len(metadata):
-				idx_6b = metadata[i + 1]
-			elif b == 0x6c and i + 1 < len(metadata):
-				idx_6c = metadata[i + 1]
-
-		if idx_6b < 0 or idx_6c < 0:
-			return None
-
-		candidate = (idx_6b * 25) + idx_6c
+		absolute = (record[2] << 8) | record[3]
+		candidate = absolute - (self.setlist * self.expected_preset_name_count)
 		if 0 <= candidate < self.expected_preset_name_count:
 			return candidate
 		return None
@@ -113,50 +112,51 @@ class RequestPresetNames(Standard):
 		return aligned
 
 	def parse_preset_names(self, finalize=False):
-		pattern = [0x81, 0xcd, 0x0]
-		record_len = 25  # marker(3) + metadata/name fields up to 16-byte name area
+		"""Tag-driven scan of the accumulated payload stream.
 
-		while True:
-			search_limit = len(self.preset_names_stream) - len(pattern) + 1
-			if self.stream_parse_idx >= search_limit:
-				if not finalize:
-					self.stream_parse_idx = max(0, len(self.preset_names_stream) - len(pattern) + 1)
-				break
+		Wire format observed on Helix LT (firmware 3.x):
+		    0x81 0xCD hi lo      preset index, 16-bit big-endian
+		    0x6D  <0xA1 + len>   preset name, `len` bytes of ASCII
 
-			marker_idx = -1
-			for i in range(self.stream_parse_idx, search_limit):
-				if self.preset_names_stream[i:i + len(pattern)] == pattern:
-					marker_idx = i
-					break
+		Records are variable length, so the old fixed 25-byte window
+		desynchronised on short names. The whole stream is re-scanned on
+		each call, which is cheap at this size and keeps the parse
+		idempotent as packets arrive.
+		"""
+		str_base = 0xa1
+		stream = self.preset_names_stream
+		total = len(stream)
 
-			if marker_idx < 0:
-				if not finalize:
-					self.stream_parse_idx = max(0, len(self.preset_names_stream) - len(pattern) + 1)
-				break
+		by_index = {}
+		fallback = []
+		cur_idx = None
+		i = 0
 
-			if marker_idx + record_len > len(self.preset_names_stream):
-				if not finalize:
-					self.stream_parse_idx = marker_idx
-				break
+		while i < total - 1:
+			if stream[i] == 0x81 and stream[i + 1] == 0xcd and i + 3 < total:
+				record = stream[i:i + 4]
+				cur_idx = self._extract_record_preset_index(record)
+				i += 4
+				continue
 
-			record = self.preset_names_stream[marker_idx:marker_idx + record_len]
-			name_bytes = record[9:25]
-			name_chars = []
-			for b in name_bytes:
-				if b == 0x0:
-					break
-				if 32 <= b <= 126:
-					name_chars.append(chr(b))
-				else:
-					name_chars.append('?')
-			decoded_name = ''.join(name_chars)
-			preset_idx = self._extract_record_preset_index(record)
-			if preset_idx is not None:
-				if preset_idx not in self.decoded_preset_names_by_index:
-					self.decoded_preset_names_by_index[preset_idx] = decoded_name
-			else:
-				self.decoded_preset_names_fallback.append(decoded_name)
-			self.stream_parse_idx = marker_idx + record_len
+			if stream[i] == 0x6d and str_base < stream[i + 1] < 0xc0:
+				name_len = stream[i + 1] - str_base
+				if i + 2 + name_len <= total:
+					raw = stream[i + 2:i + 2 + name_len]
+					if all(32 <= b <= 126 for b in raw):
+						name = ''.join(chr(b) for b in raw)
+						if cur_idx is not None:
+							by_index.setdefault(cur_idx, name)
+						else:
+							fallback.append(name)
+						cur_idx = None
+						i += 2 + name_len
+						continue
+			i += 1
+
+		self.decoded_preset_names_by_index = by_index
+		self.decoded_preset_names_fallback = fallback
+		self.stream_parse_idx = total
 
 		return self._decoded_name_count()
 

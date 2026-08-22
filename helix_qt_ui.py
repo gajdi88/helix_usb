@@ -191,7 +191,7 @@ class HelixBridge(QObject):
 
 	def start(self):
 		self.status.emit(f"Starting UI bridge ({QT_BINDING})")
-		self.usb_monitor = UsbMonitor(['0e41:4246', '0e41:5055'])
+		self.usb_monitor = UsbMonitor(['0e41:4246', '0e41:424a', '0e41:5055'])
 		self.usb_monitor.register_device_found_cb(self.helix.usb_device_found_cb)
 		self.usb_monitor.register_device_lost_cb(self.helix.usb_device_lost_cb)
 		self.usb_monitor.start()

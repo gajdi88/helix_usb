@@ -23,7 +23,8 @@ log = logging.getLogger(__name__)
 
 
 class HelixUsb:
-	PRESET_LIST_COUNT = 125
+	# One Helix/LT setlist holds 128 presets (32 banks x 4).
+	PRESET_LIST_COUNT = 128
 	PRESET_PLACEHOLDER_NAME = '<empty>'
 
 	GET_STRING_VENDOR = 0x01
@@ -90,7 +91,7 @@ class HelixUsb:
 	}
 
 	MIDI_PROGRAM_MIN = 0
-	MIDI_PROGRAM_MAX = 125
+	MIDI_PROGRAM_MAX = 127
 	MIDI_PROGRAM_CHANGE_CHANNEL = 0  # MIDI ch1, zero-based in status byte
 
 	def __init__(self):
@@ -323,9 +324,9 @@ class HelixUsb:
 			self.interface_4_number = self.interface_4.bInterfaceNumber
 			for endpoint in self.interface_4:
 				desc = str(endpoint)
-				if "ENDPOINT 0x2: Bulk OUT" in desc:
+				if "ENDPOINT 0x2: Bulk OUT" in desc or "ENDPOINT 0x4: Bulk OUT" in desc:
 					self.endpoint_0x2_bulk_out = endpoint
-				elif "ENDPOINT 0x82: Bulk IN" in desc:
+				elif "ENDPOINT 0x82: Bulk IN" in desc or "ENDPOINT 0x84: Bulk IN" in desc:
 					self.endpoint_0x82_bulk_in = endpoint
 		except usb.core.USBError as e:
 			log.error('While trying to claim interface')
@@ -738,7 +739,7 @@ class HelixUsb:
 
 	def usb_device_found_cb(self, usb_descriptor):
 		log.info('Found: ' + str(usb_descriptor))
-		if usb_descriptor.device_id in ['0e41:4246', '0e41:5055']:
+		if usb_descriptor.device_id in ['0e41:4246', '0e41:424a', '0e41:5055']:
 			if 0 == self.config(usb_descriptor.device):
 				self.begin()
 				self.switch_mode(mode_name="Connect")
@@ -753,7 +754,7 @@ class HelixUsb:
 			log.warn('Lost connection to KPA - going to stop all used threads!')
 			self.stop_threads = True
 
-		elif usb_descriptor.device_id in ['0e41:4246', '0e41:5055']:
+		elif usb_descriptor.device_id in ['0e41:4246', '0e41:424a', '0e41:5055']:
 			# find connected open_fbv instance
 			for open_fbv in self.open_fbvs:
 				fbv_usb_descriptor = UsbMonitor.device_to_usb_descriptor(open_fbv.io_interface.usb_device)
@@ -1042,9 +1043,9 @@ def print_usage(p_b_exit=True):
 	print('\t0\tRequest current preset name')
 	print('\t1\tRequest current preset data')
 	print('\t2\tRequest preset names list (prints one line per preset: "<index>: <name>")')
-	print('\tpu\tPreset up: send MIDI Program Change to current+1 (clamped 0..125)')
-	print('\tpd\tPreset down: send MIDI Program Change to current-1 (clamped 0..125)')
-	print('\tp <n>\tDirect preset select via MIDI Program Change, where n is 0..125')
+	print('\tpu\tPreset up: send MIDI Program Change to current+1 (clamped 0..127)')
+	print('\tpd\tPreset down: send MIDI Program Change to current-1 (clamped 0..127)')
+	print('\tp <n>\tDirect preset select via MIDI Program Change, where n is 0..127')
 	print('\tsave\tFlush Excel log data to disk (only relevant with -x)')
 	print('\tq | quit | exit\tStop loop and perform clean shutdown')
 	print()
@@ -1096,7 +1097,7 @@ def main(argv):
 	signal.signal(signal.SIGINT, helix_usb.signal_handler)
 
 	# only report Line6 Helix devices
-	usb_monitor = UsbMonitor(['0e41:4246', '0e41:5055'])
+	usb_monitor = UsbMonitor(['0e41:4246', '0e41:424a', '0e41:5055'])
 
 	usb_monitor.register_device_found_cb(helix_usb.usb_device_found_cb)
 	usb_monitor.register_device_lost_cb(helix_usb.usb_device_lost_cb)
