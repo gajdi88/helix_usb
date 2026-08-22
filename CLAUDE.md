@@ -121,8 +121,9 @@ those came from before duplicating that work.
   ```
 
   then read `/tmp/helix.log`. Note `.venv/bin/python`, not bare `python`.
-- Prefer fixtures to hardware. `--record` exists now — see **Non-interactive
-  testing** below.
+- Prefer fixtures to hardware. `--record` and the fixture tests exist now —
+  see **Non-interactive testing** below. Iterating on a parser needs no LT
+  attached.
 - Lock in current behaviour with a fixture test before refactoring. 128 names
   from setlist 2 currently parse correctly — that is the regression baseline.
 
@@ -139,8 +140,26 @@ HELIX_SETLIST=2 HELIX_RECORD=tests/fixtures/lt_setlist2.jsonl \
 `helix_usb.py` also takes `-r <file.jsonl>`. Lines are flushed as they are
 written, so a `timeout` SIGTERM does not lose the capture.
 
-Capture matrix worth recording: each setlist; presets with 1 / 8 / 16 blocks;
-a split path; all footswitches assigned; an empty preset.
+Replaying (needs nothing attached):
+
+```
+.venv/bin/python -m unittest discover -s tests -t .
+```
+
+`tests/replay.py` feeds a capture through the **real** stack — `ReplayHelixUsb`
+is `HelixUsb` with only `endpoint_0x1_out` and `switch_mode` replaced, so the
+packet matcher, keep-alive detector and `set_preset_names` truncation are all
+production code. Every `.jsonl` in `tests/fixtures/` is replayed and checked
+against the `expect` block in its own meta record, so **adding a hardware
+capture needs no new test code** — only an `expect` block:
+
+```json
+{"setlist": 2, "expect": {"count": 128, "no_placeholder": true,
+ "names_by_index": {"25": "TwoPrinces", "127": "Voice"}}}
+```
+
+Capture matrix still worth recording: each setlist; presets with 1 / 8 / 16
+blocks; a split path; all footswitches assigned; an empty preset.
 
 ## Process lifecycle and SIGTERM
 
@@ -174,5 +193,12 @@ margin.
 
 ## Verified baseline
 
-`HELIX_SETLIST=2` (run as above) logs 128 names, indices 0–127, with
-"TwoPrinces" at 25 and "Voice" at 127, and no truncation warning.
+`tests/fixtures/synthetic_setlist2.jsonl` is **generated from the wire model in
+this file, not recorded from hardware** (`tests/make_synthetic_capture.py`). It
+locks in current parser behaviour — verified to fail on a fixed 25-byte record
+window, on `expected_preset_name_count = 125`, and on ignoring the `0x81 0xCD`
+index marker — but it cannot confirm the wire model is right. A real capture
+is still owed.
+
+On hardware, `HELIX_SETLIST=2` (run as above) logs 128 names, indices 0–127,
+with "TwoPrinces" at 25 and "Voice" at 127, and no truncation warning.
