@@ -48,6 +48,11 @@ string. This has been verified across ~256 real entries.
 Key facts:
 
 - A setlist holds **128** presets (32 banks × 4). Eight setlists, 1024 total.
+- **Setlist numbering is off by one between the device and the wire.** The LT
+  displays setlists 1–8; the protocol (and `HELIX_SETLIST`, and the
+  `lt_setlist*.jsonl` fixture names) indexes them 0–7. "Setlist 4" on the
+  front panel is wire index 3. Confirmed 2026-08-22: with the device switched
+  to its setlist 4, the `0x6B 0xCD` tag read 3. Always say which you mean.
 - Preset indices are absolute: `setlist * 128 + slot`. Setlist 2 slot 25
   arrives as `0x81 0xCD 0x01 0x19` (281).
 - **Entries arrive out of order.** Always key on the index, never on arrival
