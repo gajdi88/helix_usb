@@ -85,6 +85,8 @@ Fixing the matcher fixed the plural mode by side effect.
 
 ## Known broken
 
+Open work and ideas not yet started are tracked in `BACKLOG.md`.
+
 `utils/preset_parser.py::extract_footswitch_sections` does
 `data.index('0895')` and raises `ValueError` on LT presets — `0895` is an HX
 Stomp marker. This kills `modes/request_preset` in a worker thread on every
