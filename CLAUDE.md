@@ -98,6 +98,46 @@ Stomp marker. This kills `modes/request_preset` in a worker thread on every
 run. It does not affect preset names. Confirmed still failing on the
 2026-08-22 hardware run: three tracebacks per startup.
 
+### Preset-data layout (derived 2026-08-22 from the captures)
+
+Worked out by diffing the empty-preset capture against populated ones, and
+asserted across all 15 fixtures by `tests/test_preset_data_structure.py`.
+
+**The LT payload is upstream's HX Stomp layout twice.** Split the hex on
+`8213` and you get **41 segments** in every capture: a header, then two
+identical 20-segment groups. Each group is upstream's single-path structure —
+
+| Index in group | Content |
+|---|---|
+| 0 | marker, starts `00` |
+| 1–8 | eight assignable slots |
+| 9 | marker, starts `01` |
+| 10 | marker, starts `02` |
+| 11–18 | eight assignable slots |
+| 19 | marker, starts `03` |
+
+so 16 assignable slots per group, **32 across the two DSP paths**. Upstream's
+`assignable_slots = [1..8, 11..18]` is right; it just stops after one group.
+
+- An **empty slot** is the 3-byte segment `0814c0`. Occupied slots are longer
+  and start `0614851883` (or `07148408cc`).
+- **Block count is therefore readable from a capture** by counting non-`0814c0`
+  assignable segments. The empty preset yields 0, populated ones 5–15.
+- Block names live in the **trailing segment 40**, not in the slot records —
+  slots evidently reference them. Only some blocks appear there as cleartext,
+  so counting names badly undercounts (preset 120: 3 names, 11 occupied slots).
+- The `8213` marker is byte-aligned in all 15 captures, so splitting the hex
+  string is safe here — but it is a nibble-level split and would corrupt the
+  layout if that ever stopped holding. There is a test for it.
+
+**Markers that do not exist on the LT**, both inherited from the Stomp and both
+confirmed absent from all 15 captures:
+
+- `0895` — `utils/preset_parser.py::extract_footswitch_sections` does
+  `data.index('0895')`, hence the `ValueError` on every startup.
+- `860600070208` — `modes/request_preset.py` uses it to detect the active
+  snapshot, so snapshot reporting is silently dead too.
+
 This is the **big remaining job**: block/slot and footswitch parsing. The LT
 has two DSP paths with ~16 block positions plus splits/merges and a 1→2
 routing block, against the Stomp's single path of 8. Also 8 snapshots vs 3,

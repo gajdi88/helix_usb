@@ -10,14 +10,19 @@ shipping parser, not about a mock of it.
 import logging
 import os
 import sys
+import threading
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from helix_usb import HelixUsb
+from modes.request_preset import RequestPreset
 from modes.request_preset_names import RequestPresetNames
+from utils.formatter import format_1
 from utils.packet_recorder import load_capture
 
 FIXTURE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures')
+PRESET_FIXTURE_DIR = os.path.join(FIXTURE_DIR, 'presets')
 
 
 class ReplayHelixUsb(HelixUsb):
@@ -111,11 +116,106 @@ def replay_preset_names(capture_path, setlist=None):
 	return ReplayResult(meta, packets, helix, mode, collector.messages)
 
 
+class _NoopTimer(object):
+	"""Stand-in for threading.Timer during a replay.
+
+	RequestPreset arms a 0.02s timer after every packet to decide the transfer
+	has ended. A whole capture replays in microseconds, so those timers would
+	fire on background threads after the feed loop and parse concurrently.
+	Replay drives the parse once, explicitly, instead.
+	"""
+
+	def __init__(self, *args, **kwargs):
+		pass
+
+	def start(self):
+		pass
+
+	def cancel(self):
+		pass
+
+
+class PresetDataResult(object):
+	def __init__(self, meta, packets, helix, mode, warnings, parse_error):
+		self.meta = meta
+		self.packets = packets
+		self.helix = helix
+		self.mode = mode
+		self.warnings = warnings
+		self.parse_error = parse_error
+
+	@property
+	def preset_data(self):
+		"""Concatenated payload, transport headers stripped."""
+		return self.mode.preset_data
+
+	@property
+	def hex_str(self):
+		"""The payload as the flat hex string the parser consumes."""
+		return format_1(', '.join(hex(b) for b in self.mode.preset_data))
+
+	@property
+	def hx_preset(self):
+		return self.mode.hx_preset
+
+	@property
+	def observed(self):
+		return self.meta.get('observed', {})
+
+
+def replay_preset_data(capture_path):
+	"""Feed a preset-data capture through RequestPreset.
+
+	Returns the accumulated payload whether or not parsing succeeded --
+	`extract_footswitch_sections` currently raises on every LT preset, and the
+	captured bytes are exactly what is needed to fix that, so a parse failure
+	must not cost us the data.
+	"""
+	meta, packets = load_capture(capture_path)
+
+	collector = _WarningCollector()
+	root = logging.getLogger()
+	saved_handlers, saved_level = root.handlers[:], root.level
+	root.handlers = [collector]
+	root.setLevel(logging.WARNING)
+
+	helix = ReplayHelixUsb()
+	mode = RequestPreset(helix)
+	helix.active_mode = mode
+	parse_error = None
+
+	try:
+		with mock.patch.object(threading, 'Timer', _NoopTimer):
+			mode.start()
+			for packet in packets:
+				if packet.get('ep', '0x81') != '0x81':
+					continue
+				helix.data_in('0x81', packet['bytes'])
+			try:
+				mode.parse_preset_data()
+			except Exception as e:      # noqa: BLE001 - recording it is the point
+				parse_error = e
+	finally:
+		root.handlers, root.level = saved_handlers, saved_level
+
+	return PresetDataResult(meta, packets, helix, mode, collector.messages, parse_error)
+
+
 def fixture_paths():
 	if not os.path.isdir(FIXTURE_DIR):
 		return []
 	return sorted(
 		os.path.join(FIXTURE_DIR, name)
 		for name in os.listdir(FIXTURE_DIR)
+		if name.endswith('.jsonl')
+	)
+
+
+def preset_fixture_paths():
+	if not os.path.isdir(PRESET_FIXTURE_DIR):
+		return []
+	return sorted(
+		os.path.join(PRESET_FIXTURE_DIR, name)
+		for name in os.listdir(PRESET_FIXTURE_DIR)
 		if name.endswith('.jsonl')
 	)
