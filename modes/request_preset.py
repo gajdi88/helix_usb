@@ -143,6 +143,9 @@ class RequestPreset(Standard):
 		# never occurs on the LT; the LT emits exactly one 8606 record whose
 		# third byte is the 0-based snapshot index. Confirmed by capturing the
 		# same preset on snapshot 1 (00) and snapshot 3 (02).
+		if self.hx_preset.snapshot_names:
+			self.helix_usb.set_snapshot_names(self.hx_preset.snapshot_names)
+
 		snapshot = self.extract_active_snapshot(nice_str)
 		if snapshot is not None:
 			self.helix_usb.set_snapshot(snapshot)

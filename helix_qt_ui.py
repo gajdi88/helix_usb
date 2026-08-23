@@ -187,6 +187,8 @@ class HelixBridge(QObject):
 	preset_names_changed = Signal(list)
 	preset_no_changed = Signal(int)
 	slot_data_changed = Signal(int, object)
+	snapshot_changed = Signal(int)
+	snapshot_names_changed = Signal(list)
 	connection_changed = Signal(bool)
 	status = Signal(str)
 
@@ -201,6 +203,8 @@ class HelixBridge(QObject):
 		self.helix.register_preset_names_change_cb_fct(self._on_preset_names)
 		self.helix.register_preset_no_change_cb_fct(self._on_preset_no)
 		self.helix.register_slot_data_change_cb_fct(self._on_slot_data)
+		self.helix.register_snapshot_change_cb_fct(self._on_snapshot)
+		self.helix.register_snapshot_names_change_cb_fct(self._on_snapshot_names)
 
 		self.connection_poll = QTimer(self)
 		self.connection_poll.setInterval(400)
@@ -252,6 +256,12 @@ class HelixBridge(QObject):
 
 	def _on_preset_names(self, preset_names):
 		self.preset_names_changed.emit(list(preset_names))
+
+	def _on_snapshot(self, snapshot_no):
+		self.snapshot_changed.emit(int(snapshot_no))
+
+	def _on_snapshot_names(self, names):
+		self.snapshot_names_changed.emit(list(names))
 
 	def _on_preset_no(self, preset_no):
 		self.preset_no_changed.emit(preset_no)
@@ -428,6 +438,24 @@ class MainWindow(QMainWindow):
 		strip_panel.set_endpoints(input_label, output_label)
 		block_row_layout.addWidget(strip_panel, 1)
 
+		snapshot_row = QHBoxLayout()
+		snapshot_row.setSpacing(6)
+		snapshot_header = QLabel("Snapshots")
+		snapshot_header.setObjectName("sectionHeader")
+		right_layout.addWidget(snapshot_header)
+
+		# Display only. Selecting a snapshot would write device state, which
+		# this tool does not do without being asked.
+		self.snapshot_labels = []
+		for idx in range(HelixUsb.SNAPSHOT_COUNT):
+			pill = QLabel('SNAPSHOT {}'.format(idx + 1))
+			pill.setObjectName("snapshotPill")
+			pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
+			snapshot_row.addWidget(pill, 1)
+			self.snapshot_labels.append(pill)
+		right_layout.addLayout(snapshot_row)
+		self._refresh_snapshot_pills()
+
 		details_row = QHBoxLayout()
 		details_row.setSpacing(10)
 		right_layout.addLayout(details_row)
@@ -503,6 +531,8 @@ class MainWindow(QMainWindow):
 		self.chk_show_debug_console.toggled.connect(self.log_view.setVisible)
 
 		self.bridge.preset_names_changed.connect(self._on_preset_names_changed)
+		self.bridge.snapshot_changed.connect(self._on_snapshot_changed)
+		self.bridge.snapshot_names_changed.connect(self._on_snapshot_names_changed)
 		self.bridge.preset_no_changed.connect(self._on_preset_no_changed)
 		self.bridge.slot_data_changed.connect(self._on_slot_data_changed)
 		self.bridge.connection_changed.connect(self._on_connection_changed)
@@ -616,6 +646,30 @@ class MainWindow(QMainWindow):
 		else:
 			self.lbl_connection.setText("Connection: Waiting for device")
 			self.lbl_connection.setStyleSheet("#statusPill { background: #4d3030; border: 1px solid #764242; }")
+
+	SNAPSHOT_PILL_IDLE = ("#snapshotPill { background: #2b2f36; border: 1px solid #3a3f46; "
+						  "border-radius: 6px; padding: 4px 2px; color: #9aa0a6; }")
+	SNAPSHOT_PILL_ACTIVE = ("#snapshotPill { background: #245034; border: 1px solid #2f7f4e; "
+							"border-radius: 6px; padding: 4px 2px; color: #e8eaed; "
+							"font-weight: bold; }")
+
+	def _refresh_snapshot_pills(self):
+		names = self.bridge.helix.snapshot_names
+		active = self.bridge.helix.current_snapshot
+		for idx, pill in enumerate(self.snapshot_labels):
+			number = idx + 1
+			label = names[idx] if idx < len(names) else 'SNAPSHOT {}'.format(number)
+			pill.setText('{}. {}'.format(number, label))
+			pill.setToolTip('Snapshot {}: {}'.format(number, label))
+			pill.setStyleSheet(self.SNAPSHOT_PILL_ACTIVE if number == active
+							   else self.SNAPSHOT_PILL_IDLE)
+
+	def _on_snapshot_changed(self, snapshot_no):
+		self._refresh_snapshot_pills()
+		self._append_status('Snapshot {}'.format(snapshot_no))
+
+	def _on_snapshot_names_changed(self, _names):
+		self._refresh_snapshot_pills()
 
 	def _on_preset_names_changed(self, preset_names):
 		normalized_names = normalize_preset_names(preset_names)

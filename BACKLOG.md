@@ -39,8 +39,11 @@ Section extraction works and all 15 captures parse. Remaining, in order:
   extracted correctly; the field parser inside produces empty objects.
 - **Snapshot parameter values.** Names, the stored index and live changes all
   work now; the ~628 bytes of per-snapshot parameter state do not.
-- **The UI does not show snapshots at all.** `helix_qt_ui.py` registers no
-  snapshot callback, so nothing surfaces even though the data is there.
+- **Selecting a snapshot from the UI.** The snapshot row is display-only;
+  making the pills clickable means writing device state, which needs asking
+  first. The device presumably accepts a snapshot-select message — the one it
+  *emits* on a press (`82 69 2a/2e 6a 81 5c <n> 44`) is the obvious starting
+  point, but sending it is untested and unasked-for.
 - **Missing module ids** in `modules.py` (`cd02bb`, `cd02cd`, …).
 - **`to_string()` bank arithmetic** assumes 3 presets per bank; the LT has 4.
 - **Splits/merges and the 1→2 routing block** are still entirely unmodelled.

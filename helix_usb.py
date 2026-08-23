@@ -170,6 +170,8 @@ class HelixUsb:
 			self.slot_data.append(si)
 		self.slot_data_change_cb_fct_list = list()
 		self.snapshot_change_cb_fct_list = list()
+		self.snapshot_names = []
+		self.snapshot_names_change_cb_fct_list = list()
 
 		self.excel_logger = None
 		self.packet_recorder = None
@@ -224,6 +226,18 @@ class HelixUsb:
 		if self.serial_interface is not None:
 			self.open_fbv.stop()
 			self.serial_interface.close()
+
+	def register_snapshot_names_change_cb_fct(self, p_cb_fct):
+		if p_cb_fct not in self.snapshot_names_change_cb_fct_list:
+			self.snapshot_names_change_cb_fct_list.append(p_cb_fct)
+
+	def set_snapshot_names(self, names):
+		names = list(names)
+		if names == self.snapshot_names:
+			return
+		self.snapshot_names = names
+		for cb_fct in self.snapshot_names_change_cb_fct_list:
+			cb_fct(self.snapshot_names)
 
 	def register_snapshot_change_cb_fct(self, p_cb_fct):
 		if p_cb_fct is not None:

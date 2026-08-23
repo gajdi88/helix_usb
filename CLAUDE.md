@@ -143,6 +143,11 @@ Handled in `modes/standard.py`. Two things matter there:
 `set_snapshot()` ignores a repeat of the current value, so the paired
 `0x2a`/`0x2e` messages do not double-fire. `HelixUsb.SNAPSHOT_COUNT` is 8.
 
+Snapshot names reach the UI through `HelixUsb.set_snapshot_names()`, published
+by `request_preset` after parsing. The Qt UI shows a row of eight pills with
+the active one highlighted; it is **display-only**, because selecting a
+snapshot would write device state.
+
 Still broken in preset data:
 
 - Snapshot **parameter values** are still unparsed — only names, the stored
