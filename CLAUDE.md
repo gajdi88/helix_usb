@@ -36,11 +36,11 @@ Values are tag-prefixed. Confirmed tags:
 
 | Bytes | Meaning |
 |---|---|
-| `0x81 0xCD hi lo` | preset index, 16-bit big-endian, **absolute across the device** |
+| `0x81 0xCD hi lo` | **storage** index, 16-bit big-endian, absolute across the device — *not* the displayed slot, see below |
 | `0x6D <0xA1+len>` | string: length is `marker - 0xA1`, then that many ASCII bytes |
 | `0x6B 0xCD hi lo` | setlist index (0–7) |
 | `0x6C 0xCD hi lo` | preset number |
-| `0x84 0xCD 0x00` | precedes the name tag in list entries; meaning unknown |
+| `0x84 0xCD 0x00` | precedes the name tag in list entries; constant `0` across all 128 records in every capture, so it is *not* a display index |
 
 `0xCD` appears to introduce a 16-bit integer. `0xA1 + n` introduces an n-byte
 string. This has been verified across ~256 real entries.
@@ -226,6 +226,22 @@ the slot the device displays. If a preset has ever been moved, the two diverge:
 on this device the enumeration reports `TwoPrinces` at index 25 while the front
 panel shows `A30 Fawn Brt` at 7B, because the operator moved TwoPrinces to the
 end at some point.
+
+**The name enumeration only ever returned storage order.** It did not break
+and it has not drifted — re-running it today reproduces the original capture
+exactly. Before a preset was moved, storage order and display order were the
+same, so it looked like a display list. Moving one preset revealed they are
+different things.
+
+Proved directly (`tests/fixtures/live/program_change_25.jsonl`): sending MIDI
+Program Change 25 makes the device load **A30 Fawn Brt** and report `0x6C = 25`,
+while the enumeration lists **TwoPrinces** at storage index 25. Same device,
+same moment, two numbering systems.
+
+**Display position is not present in the name-list message.** Its records carry
+exactly two 16-bit fields, `0x81 0xCD` (storage index) and `0x84 0xCD` (constant
+zero). There is currently **no known way to read display order over the wire**;
+HX Edit presumably uses a message we have not captured.
 
 **MIDI Program Change selects by display position**, not storage index.
 Established 2026-08-23: the operator named the Path 2 output of three presets

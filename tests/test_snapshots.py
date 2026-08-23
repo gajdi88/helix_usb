@@ -107,3 +107,82 @@ class SetSnapshotBoundsTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ProgramChangeIndexTest(unittest.TestCase):
+    """Program Change and the name enumeration use different indices.
+
+    Captured 2026-08-23: PC 25 was sent and the device asked what it had
+    loaded. It answered "A30 Fawn Brt" with preset tag 25, while the name
+    enumeration lists TwoPrinces at storage index 25. The operator had moved
+    TwoPrinces to the end of the setlist.
+
+    This is why preset names on the sl2_preset* fixtures are unreliable: those
+    captures were selected by Program Change (display position) and then
+    labelled from the enumeration (storage index).
+    """
+
+    FIXTURE = 'tests/fixtures/live/program_change_25.jsonl'
+
+    @classmethod
+    def setUpClass(cls):
+        if not os.path.exists(cls.FIXTURE):
+            raise unittest.SkipTest('program-change fixture missing')
+        from utils.packet_recorder import load_capture
+        cls.meta, pkts = load_capture(cls.FIXTURE)
+        cls.stream = [b for p in pkts for b in p['bytes'][16:]]
+
+    def _tag16(self, tag):
+        out, i = [], 0
+        while i < len(self.stream) - 3:
+            if self.stream[i] == tag and self.stream[i + 1] == 0xcd:
+                out.append((self.stream[i + 2] << 8) | self.stream[i + 3])
+                i += 4
+                continue
+            i += 1
+        return sorted(set(out))
+
+    def _names(self):
+        out, i = [], 0
+        while i < len(self.stream) - 1:
+            if self.stream[i] == 0x6d and 0xa1 < self.stream[i + 1] < 0xc0:
+                length = self.stream[i + 1] - 0xa1
+                raw = self.stream[i + 2:i + 2 + length]
+                if len(raw) == length and all(32 <= c <= 126 for c in raw):
+                    out.append(''.join(map(chr, raw)))
+                    i += 2 + length
+                    continue
+            i += 1
+        return out
+
+    def test_device_reports_the_program_number_it_was_sent(self):
+        self.assertIn(25, self._tag16(0x6c))
+
+    def test_device_loaded_a_different_preset_than_storage_index_25(self):
+        loaded = self._names()[0]
+        self.assertEqual('A30 Fawn Brt', loaded)
+        self.assertNotEqual('TwoPrinces', loaded)
+
+    def test_enumeration_still_lists_twoprinces_at_storage_25(self):
+        import json
+        names = json.loads(
+            open('tests/fixtures/lt_setlist2.jsonl').readline())['expect']['names_by_index']
+        self.assertEqual('TwoPrinces', names['25'])
+        self.assertEqual('A30 Fawn Brt', names['26'])
+
+    def test_name_records_carry_no_display_index(self):
+        """The name list has only the storage index and a constant zero."""
+        from utils.packet_recorder import load_capture
+        _meta, pkts = load_capture('tests/fixtures/lt_setlist2.jsonl')
+        stream = []
+        for p in pkts:
+            b = p['bytes']
+            if len(b) > 16 and b[4] == 0xef and b[11] == 0x04:
+                stream.extend(b[16:])
+        seen = set()
+        i = 0
+        while i < len(stream) - 3:
+            if stream[i + 1] == 0xcd:
+                seen.add(stream[i])
+            i += 1
+        self.assertEqual({0x81, 0x84, 0x66}, seen)
