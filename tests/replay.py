@@ -98,9 +98,11 @@ def replay_preset_names(capture_path, setlist=None):
 
 	helix = ReplayHelixUsb()
 	mode = RequestPresetNames(helix)
-	# Set directly rather than via HELIX_SETLIST so a replay never depends on
-	# the environment it runs in.
+	# Pin the setlist so a replay never depends on the environment or on what
+	# the device happened to be showing. _choose_setlist() would otherwise
+	# re-derive it in start().
 	mode.setlist = setlist
+	mode._choose_setlist = lambda: setlist
 	helix.active_mode = mode
 
 	try:

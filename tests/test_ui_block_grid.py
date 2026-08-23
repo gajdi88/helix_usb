@@ -55,11 +55,17 @@ class BlockGridTest(unittest.TestCase):
         for key in self.window._block_buttons:
             self.assertEqual('-', self.window._block_buttons[key].text())
 
+    def test_empty_slots_are_blank_after_a_preset_loads(self):
+        """Empty slots should recede, not read as content."""
+        self.window.bridge.helix.set_preset_layout(self.layout)
+        self.assertEqual('', self._text(0, 3))
+        self.assertEqual('', self._text(1, 8))
+
     def test_blocks_appear_in_the_right_row_and_position(self):
         self.window.bridge.helix.set_preset_layout(self.layout)
         # Straight from the operator's reading of this preset.
         self.assertTrue(self._text(0, 1).startswith('Red Squeeze'))
-        self.assertEqual('-', self._text(0, 3))
+        self.assertEqual('', self._text(0, 3))
         self.assertTrue(self._text(1, 3).startswith('Cali Q'))
         self.assertTrue(self._text(3, 4).startswith('Room'))
 
@@ -124,7 +130,7 @@ class BlockGridTest(unittest.TestCase):
             {'name': '?cdffff', 'category': 'Unknown', 'unknown_id': 'cdffff'})
         self.window.bridge.helix.set_preset_layout(layout)
         btn = self.window._block_buttons[(0, 3)]
-        self.assertNotEqual('-', btn.text())
+        self.assertNotEqual('', btn.text())
         self.assertIn('cdffff', btn.text())
         self.assertIn('cdffff', btn.toolTip())
 
@@ -139,3 +145,88 @@ class BlockGridTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SignalFlowTest(unittest.TestCase):
+    """A row that carries signal has to look like it does.
+
+    Feedback from using the GUI: with every row drawn identically it was
+    impossible to tell where the sound actually goes. Path 1 upper always
+    carries signal even when its slots are empty; a lower row only does if the
+    path splits into it or an upstream path fans out to it.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            from PySide6.QtWidgets import QApplication
+            import helix_qt_ui
+        except ImportError as e:
+            raise unittest.SkipTest('Qt unavailable: %s' % e)
+        cls.app = QApplication.instance() or QApplication([])
+        cls._real_start = helix_qt_ui.HelixBridge.start
+        helix_qt_ui.HelixBridge.start = lambda self: None
+        cls.ui = helix_qt_ui
+
+    @classmethod
+    def tearDownClass(cls):
+        if hasattr(cls, '_real_start'):
+            cls.ui.HelixBridge.start = cls._real_start
+
+    def setUp(self):
+        self.window = self.ui.MainWindow()
+        self.addCleanup(self.window.deleteLater)
+
+    def _live(self, row):
+        links = self.window._row_connectors[row]
+        self.assertTrue(links)
+        return all(self.ui.MainWindow.LINK_LIVE == l.styleSheet() for l in links)
+
+    def test_upper_rows_always_carry_signal(self):
+        layout = replay_preset_data(FIXTURE).hx_preset.to_layout()
+        self.window.bridge.helix.set_preset_layout(layout)
+        self.assertTrue(self._live(0))
+        self.assertTrue(self._live(2))
+
+    def test_lower_row_is_live_only_when_the_path_splits(self):
+        layout = replay_preset_data(FIXTURE).hx_preset.to_layout()
+        self.window.bridge.helix.set_preset_layout(layout)
+        # Preset 7A splits on both paths, so both lower rows carry signal.
+        self.assertTrue(self._live(1))
+        self.assertTrue(self._live(3))
+
+    def test_unsplit_lower_rows_are_dead(self):
+        serial = 'tests/fixtures/presets/sl2_preset036.jsonl'
+        if not os.path.exists(serial):
+            self.skipTest('serial fixture missing')
+        self.window.bridge.helix.set_preset_layout(
+            replay_preset_data(serial).hx_preset.to_layout())
+        self.assertTrue(self._live(0))
+        self.assertFalse(self._live(1))
+        self.assertFalse(self._live(3))
+
+    def test_a_row_fed_from_upstream_is_live_without_a_split(self):
+        """The fan-out case: Path 2 has no split but is fed by Path 1."""
+        fanout = 'tests/fixtures/presets/a2_routing_fanout.jsonl'
+        if not os.path.exists(fanout):
+            self.skipTest('fan-out fixture missing')
+        layout = replay_preset_data(fanout).hx_preset.to_layout()
+        self.window.bridge.helix.set_preset_layout(layout)
+        p2 = next(r for r in layout['routing'] if r['path'] == 2)
+        self.assertIsNone(p2['split_position'])
+        self.assertTrue(self._live(3))
+
+    def test_row_caption_dims_on_a_dead_row(self):
+        serial = 'tests/fixtures/presets/sl2_preset036.jsonl'
+        if not os.path.exists(serial):
+            self.skipTest('serial fixture missing')
+        self.window.bridge.helix.set_preset_layout(
+            replay_preset_data(serial).hx_preset.to_layout())
+        self.assertIn('#c8ccd2', self.window._row_captions[0].styleSheet())
+        self.assertIn('#5a6068', self.window._row_captions[1].styleSheet())
+
+    def test_block_font_is_small_enough_to_read(self):
+        layout = replay_preset_data(FIXTURE).hx_preset.to_layout()
+        self.window.bridge.helix.set_preset_layout(layout)
+        style = self.window._block_buttons[(0, 1)].styleSheet()
+        self.assertIn('font-size: 10px', style)

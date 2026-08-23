@@ -181,6 +181,9 @@ class HelixUsb:
 		# "USER 1". Populated by the RequestSetlistNames mode.
 		self.setlist_names = []
 		self.setlist_names_change_cb_fct_list = list()
+		# Which setlist the device is on, learned from the singular
+		# preset-name reply. None until seen.
+		self.current_setlist = None
 
 		self.excel_logger = None
 		self.packet_recorder = None
@@ -235,6 +238,12 @@ class HelixUsb:
 		if self.serial_interface is not None:
 			self.open_fbv.stop()
 			self.serial_interface.close()
+
+	def set_current_setlist(self, wire_index):
+		if not (0 <= wire_index <= 7) or wire_index == self.current_setlist:
+			return
+		self.current_setlist = wire_index
+		log.info('Device is on %s', self.setlist_label(wire_index))
 
 	def register_setlist_names_change_cb_fct(self, p_cb_fct):
 		if p_cb_fct not in self.setlist_names_change_cb_fct_list:

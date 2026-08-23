@@ -50,6 +50,13 @@ class RequestPresetName(Standard):
         # Helix/LT, so both are wildcards here.
         elif self.helix_usb.my_byte_cmp(left=data_in[23:], right=[0x0, 0x83, 0x66, 0xcd, "XX", "XX", 0x67, 0x0, 0x68, "XX", 0x6b, 0xcd, 0x0, "XX", 0x6c, 0xcd], length=16):
             # self.helix_usb.log_data_in(data_in)
+            # The setlist the device is actually on. The matcher above pins
+            # 0x6b 0xcd 0x00 at data_in[33:36], so the value follows at [36].
+            # Without this the UI enumerates setlist 0 whatever the device is
+            # showing, and the preset list belongs to the wrong setlist.
+            if len(data_in) > 36:
+                self.helix_usb.set_current_setlist(data_in[36])
+
             for b in data_in[16:]:
                 self.preset_name_data.append(b)
 

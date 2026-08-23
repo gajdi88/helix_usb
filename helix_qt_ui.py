@@ -190,6 +190,7 @@ class HelixBridge(QObject):
 	snapshot_changed = Signal(int)
 	preset_layout_changed = Signal(object)
 	snapshot_names_changed = Signal(list)
+	setlist_names_changed = Signal(list)
 	connection_changed = Signal(bool)
 	status = Signal(str)
 
@@ -206,6 +207,7 @@ class HelixBridge(QObject):
 		self.helix.register_slot_data_change_cb_fct(self._on_slot_data)
 		self.helix.register_snapshot_change_cb_fct(self._on_snapshot)
 		self.helix.register_preset_layout_change_cb_fct(self._on_preset_layout)
+		self.helix.register_setlist_names_change_cb_fct(self._on_setlist_names)
 		self.helix.register_snapshot_names_change_cb_fct(self._on_snapshot_names)
 
 		self.connection_poll = QTimer(self)
@@ -259,6 +261,9 @@ class HelixBridge(QObject):
 	def _on_preset_names(self, preset_names):
 		self.preset_names_changed.emit(list(preset_names))
 
+	def _on_setlist_names(self, names):
+		self.setlist_names_changed.emit(list(names))
+
 	def _on_preset_layout(self, layout):
 		self.preset_layout_changed.emit(layout)
 
@@ -286,7 +291,12 @@ class HelixBridge(QObject):
 
 		if connected and not self._requested_initial_names and not self.helix.got_preset_names:
 			self._requested_initial_names = True
-			self.request_preset_names()
+			# Setlist names first, so the preset list can be labelled with the
+			# name the front panel shows rather than a bare number. Only one
+			# mode runs at a time, so the preset-name request follows once
+			# that has had time to complete.
+			self.helix.switch_mode("RequestSetlistNames")
+			QTimer.singleShot(3000, self.request_preset_names)
 
 
 class MainWindow(QMainWindow):
@@ -327,6 +337,7 @@ class MainWindow(QMainWindow):
 
 		preset_header = QLabel("Presets")
 		preset_header.setObjectName("sectionHeader")
+		self.preset_header = preset_header
 		left_layout.addWidget(preset_header)
 
 		self.preset_list = QListWidget()
@@ -384,6 +395,8 @@ class MainWindow(QMainWindow):
 		# Four rows of eight: Path 1 upper/lower, Path 2 upper/lower. The HX
 		# Stomp's single strip of eight is not the LT's shape.
 		self._block_buttons = {}
+		self._row_connectors = {}
+		self._row_captions = {}
 		self._row_routing_labels = {}
 		grid_panel = QFrame()
 		grid_panel.setObjectName("blockStripPanel")
@@ -401,12 +414,22 @@ class MainWindow(QMainWindow):
 			caption.setObjectName("rowCaption")
 			caption.setFixedWidth(92)
 			row_layout.addWidget(caption)
+			self._row_captions[row_index] = caption
 
+			self._row_connectors[row_index] = []
 			for position in range(1, BLOCKS_PER_ROW + 1):
+				if position > 1:
+					# The wire between two blocks. Lit on an active row so the
+					# signal path is visible even where the slots are empty.
+					link = QLabel("")
+					link.setObjectName("chainLink")
+					link.setFixedSize(10, 34)
+					row_layout.addWidget(link)
+					self._row_connectors[row_index].append(link)
 				btn = QPushButton("-")
 				btn.setObjectName("slotButton")
 				btn.setCheckable(True)
-				btn.setFixedSize(78, 34)
+				btn.setFixedSize(96, 30)
 				btn.clicked.connect(
 					lambda _checked, r=row_index, pos=position: self._on_block_clicked(r, pos))
 				row_layout.addWidget(btn)
@@ -519,6 +542,7 @@ class MainWindow(QMainWindow):
 		self.bridge.snapshot_changed.connect(self._on_snapshot_changed)
 		self.bridge.preset_layout_changed.connect(self._on_preset_layout_changed)
 		self.bridge.snapshot_names_changed.connect(self._on_snapshot_names_changed)
+		self.bridge.setlist_names_changed.connect(self._on_setlist_names_changed)
 		self.bridge.preset_no_changed.connect(self._on_preset_no_changed)
 		self.bridge.slot_data_changed.connect(self._on_slot_data_changed)
 		self.bridge.connection_changed.connect(self._on_connection_changed)
@@ -633,6 +657,21 @@ class MainWindow(QMainWindow):
 			self.lbl_connection.setText("Connection: Waiting for device")
 			self.lbl_connection.setStyleSheet("#statusPill { background: #4d3030; border: 1px solid #764242; }")
 
+	# Empty slots must not compete with real blocks for attention, and the
+	# label has to fit: 12 characters at the old size were unreadable.
+	BLOCK_FONT = "font-size: 10px; font-weight: normal;"
+	STYLE_EMPTY = ("#slotButton { background: transparent; border: 1px solid #2b2f36;"
+				   " border-radius: 4px; color: #4c525a; %s }" % BLOCK_FONT)
+	STYLE_EMPTY_ACTIVE = ("#slotButton { background: transparent; border: 1px solid #3d444d;"
+						  " border-radius: 4px; color: #6a7079; %s }" % BLOCK_FONT)
+	STYLE_BLOCK = ("#slotButton { background: %s; border: 1px solid #3a3f46;"
+				   " border-radius: 4px; color: #10131a; " + BLOCK_FONT + " }")
+	STYLE_BYPASSED = ("#slotButton { background: #2d3239; border: 1px dashed %s;"
+					  " border-radius: 4px; color: #8b9198; font-style: italic; "
+					  + BLOCK_FONT + " }")
+	LINK_LIVE = "#chainLink { border-top: 2px solid #5c6672; }"
+	LINK_DEAD = "#chainLink { border-top: 2px dotted #262a30; }"
+
 	SNAPSHOT_PILL_IDLE = ("#snapshotPill { background: #2b2f36; border: 1px solid #3a3f46; "
 						  "border-radius: 6px; padding: 4px 2px; color: #9aa0a6; }")
 	SNAPSHOT_PILL_ACTIVE = ("#snapshotPill { background: #245034; border: 1px solid #2f7f4e; "
@@ -670,37 +709,57 @@ class MainWindow(QMainWindow):
 		bits.append('exit: %s' % (entry.get('lower_exit_name') or '?'))
 		return '  '.join(bits)
 
+	@staticmethod
+	def _row_is_live(row_index, routing):
+		"""Does signal actually flow along this row?
+
+		Upper rows always carry the path's signal, empty slots or not. A lower
+		row only carries signal if the path splits into it, or an upstream
+		path fans out to it (exit destination 4).
+		"""
+		path_no = 1 if row_index < 2 else 2
+		entry = next((r for r in routing if r['path'] == path_no), None)
+		if row_index in (0, 2):
+			return True
+		if entry is None:
+			return False
+		if entry.get('split_position'):
+			return True
+		return any(other.get('upper_exit') == 4 or other.get('lower_exit') == 4
+				   for other in routing if other['path'] < path_no)
+
 	def _on_preset_layout_changed(self, layout):
 		self._layout_rows = layout.get('rows', []) if layout else []
 		routing = layout.get('routing', []) if layout else []
 		for row_index, row in enumerate(self._layout_rows):
+			live = self._row_is_live(row_index, routing)
+			for link in self._row_connectors.get(row_index, []):
+				link.setStyleSheet(self.LINK_LIVE if live else self.LINK_DEAD)
 			for block in row['blocks']:
 				btn = self._block_buttons.get((row_index, block['position']))
 				if btn is None:
 					continue
 				if not block['name']:
-					btn.setText('-')
-					btn.setToolTip('')
-					btn.setStyleSheet(
-						"#slotButton { background: #2d3239; border: 1px solid #3a3f46;"
-						" border-radius: 5px; color: #6b7178; }")
+					btn.setText('')
+					btn.setToolTip('%s %d — empty' % (BLOCK_ROW_NAMES[row_index],
+													  block['position']))
+					btn.setStyleSheet(self.STYLE_EMPTY_ACTIVE if live else self.STYLE_EMPTY)
 					continue
 				short = block['name'].split(',')[0]
-				btn.setText(short[:12])
+				btn.setText(short[:16])
 				btn.setToolTip('%s (%s)%s' % (block['name'], block['category'] or '?',
 											  '  [bypassed]' if block['bypassed'] else ''))
 				colour = self._slot_color_for_category(block['category'])
 				if block['bypassed']:
-					# Bypassed blocks stay legible but visibly inactive.
-					btn.setStyleSheet(
-						"#slotButton { background: #2d3239; border: 1px dashed %s;"
-						" border-radius: 5px; color: #8b9198; font-style: italic; }" % colour)
+					btn.setStyleSheet(self.STYLE_BYPASSED % colour)
 				else:
-					btn.setStyleSheet(
-						"#slotButton { background: %s; border: 1px solid #3a3f46;"
-						" border-radius: 5px; color: #10131a; }" % colour)
+					btn.setStyleSheet(self.STYLE_BLOCK % colour)
 		for row_index, label in self._row_routing_labels.items():
 			label.setText(self._routing_summary(row_index, routing))
+			live = self._row_is_live(row_index, routing)
+			caption = self._row_captions.get(row_index)
+			if caption is not None:
+				caption.setStyleSheet('color: %s;' % ('#c8ccd2' if live else '#5a6068'))
 		self._append_status('Preset layout updated')
 
 	def _refresh_snapshot_pills(self):
@@ -720,6 +779,16 @@ class MainWindow(QMainWindow):
 
 	def _on_snapshot_names_changed(self, _names):
 		self._refresh_snapshot_pills()
+
+	def _on_setlist_names_changed(self, _names):
+		self._refresh_setlist_caption()
+
+	def _refresh_setlist_caption(self):
+		current = self.bridge.helix.current_setlist
+		if current is None:
+			self.preset_header.setText('Presets')
+			return
+		self.preset_header.setText('Presets — %s' % self.bridge.helix.setlist_label(current))
 
 	def _on_preset_names_changed(self, preset_names):
 		normalized_names = normalize_preset_names(preset_names)

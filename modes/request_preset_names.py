@@ -17,17 +17,31 @@ class RequestPresetNames(Standard):
 		self.decoded_preset_names_fallback = []
 		# One Helix/LT setlist holds 128 presets (32 banks x 4).
 		self.expected_preset_name_count = 128
-		# Which setlist to enumerate (0-7). Override with HELIX_SETLIST.
-		try:
-			self.setlist = int(os.environ.get('HELIX_SETLIST', '0')) & 0x7
-		except ValueError:
-			self.setlist = 0
+		# Which setlist to enumerate (0-7). HELIX_SETLIST forces one;
+		# otherwise follow whatever the device is actually on, which the
+		# singular preset-name reply tells us. Defaulting to 0 meant the UI
+		# listed FACTORY 1 while the device sat on USER 1.
+		self.setlist = self._choose_setlist()
 		self.idle_watchdog_timer = None
 		self.transfer_complete = False
 		self.preset_name_placeholder = "<empty>"
 
+	def _choose_setlist(self):
+		forced = os.environ.get('HELIX_SETLIST')
+		if forced is not None:
+			try:
+				return int(forced) & 0x7
+			except ValueError:
+				log.warning('HELIX_SETLIST=%r is not a number; ignoring', forced)
+		current = getattr(self.helix_usb, 'current_setlist', None)
+		if current is not None:
+			return current & 0x7
+		return 0
+
 	def start(self):
 		log.info('Starting mode')
+		self.setlist = self._choose_setlist()
+		log.info('Enumerating %s', self.helix_usb.setlist_label(self.setlist))
 		self.preset_names_data = []
 		self.preset_names_stream = []
 		self.stream_parse_idx = 0
