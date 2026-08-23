@@ -54,7 +54,7 @@ class SlotInfo:
         0x19: ("amp_effect_slot_a", ("until_marker", [0x1a])),
         0x1a: ("amp_effect_slot_b", ("until_marker", [0x09])),
         0x09: ("unknown_3_xc3", "byte"),
-        0x0a: ("enabled", "bool"),
+        0x0a: ("bypassed", "bool"),
         0x0b: ("info_slot_a", ("until_marker", [0x0c, 0x83])),
         0x0c: ("info_slot_b", "until_end")
     }
@@ -68,7 +68,7 @@ class SlotInfo:
         0x08: ("unknown_2_x83", ("until_marker", [0x0a])),
         0x01: ("dual_slot", "bool"),
         0x09: ("amp_effect_slot_a", "byte"),
-        0x0a: ("enabled", "bool"),
+        0x0a: ("bypassed", "bool"),
         0x07: ("info_slot", "until_end")
     }
 
@@ -156,6 +156,20 @@ class SlotInfo:
             bytes_read += size_of_data * 2
 
         return params, bytes_read
+
+    # Row layout, confirmed against a Helix LT on 2026-08-23 by reading the
+    # signal chain off the device and comparing position by position.
+    ROWS = (
+        ('Path 1 upper', range(1, 9)),
+        ('Path 1 lower', range(11, 19)),
+        ('Path 2 upper', range(21, 29)),
+        ('Path 2 lower', range(31, 39)),
+    )
+
+    @property
+    def enabled(self):
+        """True when the block is active. Stored inverted, as `bypassed`."""
+        return not getattr(self, 'bypassed', False)
 
     def id_to_names(self):
         readable_name_a = readable_name_b = ''
@@ -573,6 +587,7 @@ class HxPreset:
 
     # The Helix LT stores eight snapshots; the HX Stomp three.
     SNAPSHOT_COUNT = 8
+    PRESETS_PER_BANK = 4
     SNAPSHOT_NAME_PREFIX = 0x04
 
     @staticmethod
@@ -727,32 +742,36 @@ class HxPreset:
 
         slots_idx = [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18]
 
-        bank = int(self.preset_no / 3) + 1
-        num = self.preset_no % 3 + 1
-        letter = chr(64 + num)
+        # Four presets per bank on the Helix LT, not the HX Stomp's three.
+        # Confirmed 2026-08-23: the device displays preset 24 as 7A, and
+        # 24 // 4 + 1 = 7 with 24 % 4 = 0 -> 'A'.
+        bank = self.preset_no // HxPreset.PRESETS_PER_BANK + 1
+        letter = chr(ord('A') + self.preset_no % HxPreset.PRESETS_PER_BANK)
         print("---------------------------------------------------------------------------")
         print('Preset {}{} ({}): {}'.format(bank, letter, self.preset_no, self.preset_name))
         print("---------------------------------------------------------------------------")
 
-        print("Slots: ")
-        for slot_idx in slots_idx:
-            slot = self.slot_info[slot_idx] if slot_idx < len(self.slot_info) else None
-            if slot is None:
-                print('[{}]: -'.format(slot_idx))
-                continue
-            module_name_info = slot.id_to_names()
-            beauty_str = ''
-            if module_name_info[0] == '' and module_name_info[1] == '':
-                beauty_str += '[{}]: -'.format(slot_idx)
-            elif module_name_info[0] != '':
-                beauty_str = '[{}]: {}'.format(slot_idx, module_name_info[0][1].replace(' (mono)', '').replace(' (stereo)', ''))
-                beauty_str += ' ({})'.format(module_name_info[0][0])
-
-            if module_name_info[1] != '':
-                beauty_str += ', {}'.format(module_name_info[1][1].replace(' (mono)', '').replace(' (stereo)', ''))
-                beauty_str += ' ({})'.format(module_name_info[1][0])
-
-            print(beauty_str)
+        # All four rows. Printing only the first sixteen slots hid half of
+        # every preset -- the LT has two paths, each with an upper and lower
+        # row of eight.
+        for row_name, idxs in SlotInfo.ROWS:
+            print("{}:".format(row_name))
+            for pos, slot_idx in enumerate(idxs, start=1):
+                slot = self.slot_info[slot_idx] if slot_idx < len(self.slot_info) else None
+                if slot is None:
+                    print('  [{}]: <unparsed>'.format(pos))
+                    continue
+                module_name_info = slot.id_to_names()
+                if module_name_info[0] == '' and module_name_info[1] == '':
+                    print('  [{}]: -'.format(pos))
+                    continue
+                parts = []
+                for info in module_name_info:
+                    if info:
+                        parts.append('{} ({})'.format(
+                            info[1].replace(' (mono)', '').replace(' (stereo)', ''), info[0]))
+                state = '' if slot.enabled else '  [bypassed]'
+                print('  [{}]: {}{}'.format(pos, ', '.join(parts), state))
 
         print("")
         if self.snapshot_names:

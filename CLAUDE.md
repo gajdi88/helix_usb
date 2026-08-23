@@ -219,6 +219,40 @@ footswitch number — don't read it as one.
 These markers are nibble-indexed string searches, so matches are checked for
 byte alignment; an odd-offset match would shift every field after it.
 
+### Block layout — confirmed against the device 2026-08-23
+
+The operator read preset 24 ("ACDC", shown as **7A**) off the LT screen block
+by block. The parse matched position for position, so the row mapping is
+**verified, not inferred**:
+
+| Slot indices | Row |
+|---|---|
+| 1–8 | Path 1 upper |
+| 11–18 | Path 1 lower |
+| 21–28 | Path 2 upper |
+| 31–38 | Path 2 lower |
+
+Indices 0/9/10/19 and 20/29/30/39 are the chain endpoints
+(`00` in-upper, `01` out-upper, `02` in-lower, `03` out-lower), matching the
+`slot_type` legend already in `SlotInfo`.
+
+Two bugs that reading exposed:
+
+- **`0x0a` is `bypassed`, not `enabled`** — it reads inverted. Seven blocks the
+  operator called bypassed all read `True`; the one they called active read
+  `False`. Renamed, with an `enabled` property returning the inverse.
+- **Four presets per bank, not three.** `to_string()` used the Stomp's
+  `preset_no / 3`. Preset 24 displays as 7A, and `24 // 4 + 1 = 7` with
+  remainder 0 → `A`. Also explains slot 127 being **32D**.
+
+`to_string()` now prints all four rows; it previously showed only the first
+sixteen slots, hiding half of every preset.
+
+Still unmodelled: **splits, merges and the routing blocks**. The operator's
+preset has a Y split after Path 1 upper 4, an A/B split on Path 2, and two
+merge mixers, none of which appear in the slot list — they are encoded
+somewhere else.
+
 This is the **big remaining job**: block/slot and footswitch parsing. The LT
 has two DSP paths with ~16 block positions plus splits/merges and a 1→2
 routing block, against the Stomp's single path of 8. Also 8 snapshots vs 3,
