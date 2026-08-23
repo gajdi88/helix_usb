@@ -37,10 +37,9 @@ GROUND_TRUTH = {
 
     ('Path 2 upper', 1): None,
     ('Path 2 upper', 2): None,
-    # Position 3 is disputed: the parser reads "4x12 1960 T75", the operator
-    # recalled "4x12 Greenback 25" (which does appear on Path 1 upper 5, so a
-    # mis-recollection is plausible). Both are cabs, so assert only that much
-    # until someone re-reads that one block on the device.
+    # Re-checked on the device 2026-08-23: the parser was right and the first
+    # reading was a slip. It is a 4x12 1960 T75.
+    ('Path 2 upper', 3): ('1960 T75', False),
     ('Path 2 upper', 4): None,
     ('Path 2 upper', 5): ('Plate', True),
     ('Path 2 upper', 6): ('Simple EQ', True),
@@ -98,12 +97,10 @@ class BlockLayoutGroundTruthTest(unittest.TestCase):
                 self.assertEqual(bypassed, bool(getattr(slot, 'bypassed', False)))
                 self.assertEqual(not bypassed, slot.enabled)
 
-    def test_disputed_slot_is_at_least_a_cab(self):
+    def test_path2_upper_3_is_the_1960_cab(self):
         slot = self._slot('Path 2 upper', 3)
         names = [n[1] for n in slot.id_to_names() if n]
-        categories = [n[0] for n in slot.id_to_names() if n]
-        self.assertTrue(names)
-        self.assertIn('Cab', categories)
+        self.assertTrue(any('1960 T75' in n for n in names), names)
 
     def test_enabled_is_the_inverse_of_bypassed(self):
         for slot in self.preset.slot_info:
