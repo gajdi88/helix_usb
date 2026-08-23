@@ -21,6 +21,7 @@ from modes.standard import Standard
 from modes.request_preset import RequestPreset
 from modes.request_preset_names import RequestPresetNames
 from modes.request_preset_name import RequestPresetName
+from modes.request_setlist_names import RequestSetlistNames
 log = logging.getLogger(__name__)
 
 
@@ -176,6 +177,10 @@ class HelixUsb:
 		# Separate from set_slot_info(), which is the HX Stomp's 16-slot shape.
 		self.preset_layout = None
 		self.preset_layout_change_cb_fct_list = list()
+		# Setlists are named on the front panel, not numbered: wire index 2 is
+		# "USER 1". Populated by the RequestSetlistNames mode.
+		self.setlist_names = []
+		self.setlist_names_change_cb_fct_list = list()
 
 		self.excel_logger = None
 		self.packet_recorder = None
@@ -230,6 +235,29 @@ class HelixUsb:
 		if self.serial_interface is not None:
 			self.open_fbv.stop()
 			self.serial_interface.close()
+
+	def register_setlist_names_change_cb_fct(self, p_cb_fct):
+		if p_cb_fct not in self.setlist_names_change_cb_fct_list:
+			self.setlist_names_change_cb_fct_list.append(p_cb_fct)
+
+	def set_setlist_names(self, names):
+		names = list(names)
+		if names == self.setlist_names:
+			return
+		self.setlist_names = names
+		for cb_fct in self.setlist_names_change_cb_fct_list:
+			cb_fct(self.setlist_names)
+
+	def setlist_label(self, wire_index):
+		"""'USER 1 (setlist 3)' when known, else 'setlist 3'."""
+		shown = HelixUsb.setlist_display_number(wire_index)
+		if 0 <= wire_index < len(self.setlist_names) and self.setlist_names[wire_index]:
+			return '%s (setlist %d)' % (self.setlist_names[wire_index], shown)
+		return 'setlist %d' % shown
+
+	@staticmethod
+	def setlist_display_number(wire_index):
+		return wire_index + 1
 
 	def register_preset_layout_change_cb_fct(self, p_cb_fct):
 		if p_cb_fct not in self.preset_layout_change_cb_fct_list:
@@ -680,6 +708,10 @@ class HelixUsb:
 		elif mode_name == "RequestPreset":
 			self.active_mode = RequestPreset(self)
 			self.active_mode.start()
+		elif mode_name == "RequestSetlistNames":
+			self.active_mode = RequestSetlistNames(self)
+			self.active_mode.start()
+
 		elif mode_name == "RequestPresetNames":
 			self.active_mode = RequestPresetNames(self)
 			self.active_mode.start()

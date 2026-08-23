@@ -49,10 +49,12 @@ splitting at packet boundaries). There is nowhere for a display index to hide.
 
 **Leads, in order of cheapness.**
 
-1. `modes/request_preset_names.py` carries two commented-out request arrays
-   inherited from upstream — alternative queries that were presumably tried
-   against the Stomp. They may return a different record shape that includes
-   `0x6B`/`0x6C`. Costs one capture each.
+1. ~~The two commented-out request arrays.~~ Tried 2026-08-23. Neither
+   returns preset names or display coordinates. `0x3e9` turned out to be
+   **list setlist names** and is now implemented as
+   `modes/request_setlist_names.py`. `0x3e8` returns a 20-byte reply
+   (`...83 66 cd 03 e8 67 00 68 c0 79 1b 6a`) with no names and no obvious
+   payload — unidentified, possibly an ack or a status word.
 2. Capture HX Edit talking to the LT in the Windows VM while it renders the
    preset list. It must obtain display order somehow.
 3. Ask upstream whether the Stomp's `0x6B`/`0x6C` record fields have a known
