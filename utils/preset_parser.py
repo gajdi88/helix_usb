@@ -30,7 +30,9 @@ class SlotInfo:
         0x04: ("unknown_6_x90", "byte"),
         0x0f: ("unknown_7_x84", "byte"),
         0x08: ("unknown_8", "raw3"),
-        0x0d: ("unknown_9_x08", "byte"),
+        # Position on the upper row at which the path splits; 0 = no split.
+        # Provisional -- see HxPreset.extract_routing().
+        0x0d: ("split_position", "byte"),
         0x0a: ("unknown_10_xc3", "byte"),
         0x07: ("parameter", "until_end")
     }
@@ -156,6 +158,9 @@ class SlotInfo:
             bytes_read += size_of_data * 2
 
         return params, bytes_read
+
+    # Endpoint slot indices per path: (in-upper, out-upper, in-lower, out-lower)
+    PATH_ENDPOINTS = ((1, (0, 9, 10, 19)), (2, (20, 29, 30, 39)))
 
     # Row layout, confirmed against a Helix LT on 2026-08-23 by reading the
     # signal chain off the device and comparing position by position.
@@ -529,6 +534,7 @@ class HxPreset:
         self.switch_info = []
         self.slot_info = []
         self.snapshot_names = []
+        self.routing = []
         self.preset_no = preset_no
         self.preset_name = preset_name
         self._parse()
@@ -566,6 +572,9 @@ class HxPreset:
                 self.slot_info.append(None)
                 continue
             self.slot_info.append(slot_info)
+
+        # Needs slot_info populated: routing lives in the chain endpoints.
+        self.routing = self.extract_routing()
             # print(slot_info.parameter_a)
             # print(slot_info.parameter_b)
 
@@ -588,7 +597,69 @@ class HxPreset:
     # The Helix LT stores eight snapshots; the HX Stomp three.
     SNAPSHOT_COUNT = 8
     PRESETS_PER_BANK = 4
+    # merge_flag value meaning "the lower branch rejoins at the path output"
+    # rather than at a numbered position.
+    MERGE_AT_OUTPUT = 2
     SNAPSHOT_NAME_PREFIX = 0x04
+
+    @staticmethod
+    def _merge_position(out_lower_slot):
+        """Merge position from an out-lower endpoint, or None.
+
+        The value sits inside the trailing `parameter` blob rather than in a
+        field of its own, introduced by `cc97 0d`. Byte-aligned search, as
+        everywhere else in this parser.
+        """
+        blob = getattr(out_lower_slot, 'parameter', None)
+        if isinstance(blob, str):
+            try:
+                blob = bytes.fromhex(blob)
+            except ValueError:
+                return None
+        if not isinstance(blob, (bytes, bytearray)):
+            return None
+        marker = b'\xcc\x97\x0d'
+        idx = blob.find(marker)
+        if idx == -1 or idx + len(marker) >= len(blob):
+            return None
+        return blob[idx + len(marker)]
+
+    def extract_routing(self):
+        """Split and merge geometry per DSP path.
+
+        PROVISIONAL. Derived 2026-08-23 by diffing preset 24, whose topology
+        the operator read off the device, against two serial presets:
+
+          * `split_position` on the in-lower endpoint is the upper-row position
+            where the path splits; 0 means no split. Preset 24 gives 5 and 3,
+            matching the Y split after Path 1 block 4 and the A/B split on
+            Path 2. Serial presets give 0.
+          * `merge_position` comes from `cc97 0d <n>` in the out-lower blob:
+            the upper-row position the branch rejoins at. Path 2 of preset 24
+            gives 5, matching the merge before Plate.
+          * `merge_flag` 2 means the branch instead rejoins at the path
+            output. Preset 24's Path 1 reads it, matching the operator's
+            "merge mixer just before the very end". Across the fixtures every
+            split has either a merge position or this flag, never neither.
+
+        Flag values 1 and 12 occur on paths with no split and are unexplained.
+
+        Both rest on three presets agreeing, and are not confirmed until a
+        split is moved on the device and re-captured.
+        """
+        routing = []
+        for path_no, (_in_up, _out_up, in_lower, out_lower) in SlotInfo.PATH_ENDPOINTS:
+            lower_in = self.slot_info[in_lower] if in_lower < len(self.slot_info) else None
+            lower_out = self.slot_info[out_lower] if out_lower < len(self.slot_info) else None
+            flag = getattr(lower_out, 'unknown_3', None)
+            routing.append({
+                'path': path_no,
+                'split_position': (getattr(lower_in, 'split_position', 0) or 0) or None,
+                'merge_position': (self._merge_position(lower_out) or None) if lower_out else None,
+                'merges_at_output': flag == HxPreset.MERGE_AT_OUTPUT,
+                'merge_flag': flag,
+            })
+        return routing
 
     @staticmethod
     def extract_snapshot_names(data):

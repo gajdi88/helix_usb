@@ -248,10 +248,32 @@ Two bugs that reading exposed:
 `to_string()` now prints all four rows; it previously showed only the first
 sixteen slots, hiding half of every preset.
 
-Still unmodelled: **splits, merges and the routing blocks**. The operator's
-preset has a Y split after Path 1 upper 4, an A/B split on Path 2, and two
-merge mixers, none of which appear in the slot list — they are encoded
-somewhere else.
+### Routing — splits and merges (PROVISIONAL, 2026-08-23)
+
+Splits and merges are not slots; they live in the chain-endpoint segments.
+`HxPreset.extract_routing()` reads them. Derived by diffing preset 24, whose
+topology the operator read off the device, against serial presets:
+
+| Field | Where | Meaning |
+|---|---|---|
+| `split_position` | in-lower, marker `0x0d` | upper-row position the path splits at; 0 = none |
+| `merge_position` | out-lower, `cc97 0d <n>` | upper-row position the branch rejoins at |
+| `merge_flag` | out-lower, marker `0x06` | 2 = rejoins at the path output |
+
+Preset 24 comes out as Path 1 split at 5 rejoining at the output, Path 2 split
+at 3 rejoining at 5 — matching the operator's description exactly. Across all
+fixtures, every split has either a merge position or the output flag, never
+neither.
+
+**Not settled.** `merge_flag` also takes values 1 and 12, on paths whose lower
+row is populated from position 1 with `split_position` unset (presets 84, 125,
+127). Those are probably paths that split at the *input* rather than mid-row,
+so the mode lives in the flag — but that is a guess from three presets. It was
+caught by cross-checking routing against the slot data, which are parsed from
+different places.
+
+None of this is confirmed until a split is moved on the device and
+re-captured (plan item A2 in `BACKLOG.md`).
 
 This is the **big remaining job**: block/slot and footswitch parsing. The LT
 has two DSP paths with ~16 block positions plus splits/merges and a 1→2
