@@ -623,6 +623,25 @@ class HxPreset:
     SNAPSHOT_NAME_PREFIX = 0x04
 
     @staticmethod
+    def preset_reference(preset_no):
+        """Device-facing preset label: 24 -> '7A', 127 -> '32D'.
+
+        The device never shows the flat 0-127 index, so anything a person
+        reads should carry this instead of, or alongside, the number.
+        """
+        if not isinstance(preset_no, int) or preset_no < 0:
+            return '?'
+        return '%d%s' % (preset_no // HxPreset.PRESETS_PER_BANK + 1,
+                         chr(ord('A') + preset_no % HxPreset.PRESETS_PER_BANK))
+
+    @staticmethod
+    def setlist_display(wire_setlist):
+        """Wire setlist index 0-7 -> the number the device shows, 1-8."""
+        if not isinstance(wire_setlist, int):
+            return wire_setlist
+        return wire_setlist + 1
+
+    @staticmethod
     def exit_destination(output_slot):
         """Raw destination value of a chain's exit node, or None."""
         if output_slot is None:
@@ -857,13 +876,9 @@ class HxPreset:
 
         slots_idx = [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18]
 
-        # Four presets per bank on the Helix LT, not the HX Stomp's three.
-        # Confirmed 2026-08-23: the device displays preset 24 as 7A, and
-        # 24 // 4 + 1 = 7 with 24 % 4 = 0 -> 'A'.
-        bank = self.preset_no // HxPreset.PRESETS_PER_BANK + 1
-        letter = chr(ord('A') + self.preset_no % HxPreset.PRESETS_PER_BANK)
+        reference = HxPreset.preset_reference(self.preset_no)
         print("---------------------------------------------------------------------------")
-        print('Preset {}{} ({}): {}'.format(bank, letter, self.preset_no, self.preset_name))
+        print('Preset {} ({}): {}'.format(reference, self.preset_no, self.preset_name))
         print("---------------------------------------------------------------------------")
 
         # All four rows. Printing only the first sixteen slots hid half of

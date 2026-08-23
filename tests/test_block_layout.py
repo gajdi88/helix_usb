@@ -125,3 +125,41 @@ class BankNumberingTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class PresetReferenceTest(unittest.TestCase):
+    """Presets must be identifiable the way the device shows them.
+
+    A flat 0-127 index is meaningless to someone standing at the LT, and
+    ambiguous across setlists. Anything a person reads needs the bank+letter
+    reference and ideally the setlist and preset name too.
+    """
+
+    def test_reference_matches_the_device(self):
+        for preset_no, expected in ((0, '1A'), (24, '7A'), (25, '7B'),
+                                    (120, '31A'), (125, '32B'), (127, '32D')):
+            with self.subTest(preset=preset_no):
+                self.assertEqual(expected, HxPreset.preset_reference(preset_no))
+
+    def test_reference_handles_nonsense(self):
+        self.assertEqual('?', HxPreset.preset_reference(None))
+        self.assertEqual('?', HxPreset.preset_reference(-1))
+
+    def test_setlist_display_is_one_based(self):
+        self.assertEqual(1, HxPreset.setlist_display(0))
+        self.assertEqual(3, HxPreset.setlist_display(2))
+        self.assertEqual(8, HxPreset.setlist_display(7))
+
+    def test_every_preset_fixture_is_identifiable(self):
+        """Each fixture must carry enough to find it on the device."""
+        import glob
+        import json
+        paths = glob.glob('tests/fixtures/presets/*.jsonl')
+        self.assertTrue(paths)
+        for path in paths:
+            with open(path, encoding='utf-8') as fh:
+                meta = json.loads(fh.readline())
+            with self.subTest(fixture=path):
+                self.assertTrue(meta.get('preset_display'), 'no bank+letter reference')
+                self.assertTrue(meta.get('setlist_display'), 'no setlist')
+                self.assertTrue(meta.get('preset_name'), 'no preset name')
