@@ -615,6 +615,10 @@ class HxPreset:
         0: 'merged',
         1: 'Multi output',
         2: 'Path 2A',
+        # Confirmed by setting Path 1's exit to feed both Path 2 rows: Path 2
+        # then stopped reporting a split, because its lower row is fed from
+        # outside rather than by splitting its own input.
+        4: 'Path 2A + Path 2B',
     }
     SNAPSHOT_NAME_PREFIX = 0x04
 

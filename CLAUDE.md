@@ -277,6 +277,7 @@ never fitted a merge story.
 | 0 | merged into the other chain, no separate exit |
 | 1 | Multi output |
 | 2 | Path 2A |
+| 4 | Path 2A **and** Path 2B |
 | 6, 12 | observed, unexplained |
 
 1 and 2 are confirmed twice over, in opposite arrangements: preset 24 has Path
@@ -285,6 +286,13 @@ baseline has them the other way round. Merging a chain sets its exit to 0.
 
 An earlier reading of value 2 as "merges at the output" was **disproved** by
 A2 — a merge at the end is stored as merge position 9.
+
+**A lower row does not need its own split.** Setting Path 1's exit to 4 made
+Path 2's `split_position` disappear while its lower row stayed populated: the
+row is fed from upstream instead. That is the shape presets 84, 125 and 127
+have, which had no explanation before. So a populated lower row is reachable
+either by its own split or by an upstream exit fanning into it — an invariant
+that had to be weakened twice before it was right.
 
 This is the **big remaining job**: block/slot and footswitch parsing. The LT
 has two DSP paths with ~16 block positions plus splits/merges and a 1→2

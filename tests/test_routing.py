@@ -134,10 +134,13 @@ class RoutingTest(unittest.TestCase):
         and 127 carry a full Path 2 lower row from position 1 with
         `split_position` unset, and `merge_flag` of 12, 12 and 1.
 
-        The likely reading is that those paths split at the input rather than
-        mid-row, so the position is 0 and the mode lives in the flag -- but
-        that is a guess from three presets, so the assertion here is only the
-        part that holds: routing is described one way or the other.
+        That was resolved by the fan-out capture: a lower row can be fed from
+        an *upstream path* instead of by its own split. Setting Path 1's exit
+        to feed both Path 2 rows made Path 2's split disappear while its lower
+        row stayed populated -- exactly the shape presets 84, 125 and 127 have.
+
+        So a populated lower row must be reachable one of two ways: its own
+        split, or an upstream exit fanning into it.
         """
         rows = {1: 'Path 1 lower', 2: 'Path 2 lower'}
         from utils.preset_parser import SlotInfo
@@ -149,9 +152,14 @@ class RoutingTest(unittest.TestCase):
                             and any(preset.slot_info[i].id_to_names())]
                 if not occupied:
                     continue
+                fed_from_upstream = any(
+                    other['upper_exit'] == 4 or other['lower_exit'] == 4
+                    for other in preset.routing if other['path'] < entry['path'])
                 with self.subTest(fixture=name, path=entry['path']):
-                    self.assertTrue(entry['split_position'] or entry['merge_flag'],
-                                    'lower row has blocks but routing says nothing')
+                    self.assertTrue(entry['split_position']
+                                    or entry['lower_exit']
+                                    or fed_from_upstream,
+                                    'lower row has blocks but nothing feeds it')
 
     def test_unsplit_paths_with_an_empty_lower_row_are_inert(self):
         """The converse: no blocks, no split, and a zero flag."""
@@ -280,9 +288,58 @@ class ExitDestinationTest(unittest.TestCase):
         assert only that the value is one we have seen, so a new one surfaces
         as a failure rather than being silently renamed 'unknown'.
         """
-        seen = {0, 1, 2, 6, 12}
+        seen = {0, 1, 2, 4, 6, 12}
         for name, preset in self.caps.items():
             for entry in preset.routing:
                 for key in ('upper_exit', 'lower_exit'):
                     with self.subTest(fixture=name, path=entry['path'], field=key):
                         self.assertIn(entry[key], seen)
+
+
+class FanOutTest(unittest.TestCase):
+    """Exit value 4 feeds both rows of the next path.
+
+    Predicted 6 or 12 before capturing; it is 4. The prediction was wrong, but
+    the capture answered a second question that had not been asked: Path 2's
+    split vanished, because a row fed from upstream does not need one.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.caps = {os.path.basename(p): replay_preset_data(p).hx_preset
+                    for p in preset_fixture_paths()}
+        for needed in ('a2_routing_moved.jsonl', 'a2_routing_fanout.jsonl'):
+            if needed not in cls.caps:
+                raise unittest.SkipTest('missing %s' % needed)
+
+    def _p(self, fixture, path_no):
+        return next(e for e in self.caps[fixture].routing if e['path'] == path_no)
+
+    def test_exit_four_is_named(self):
+        self.assertEqual('Path 2A + Path 2B', HxPreset.exit_destination_name(4))
+
+    def test_fanning_out_changes_only_the_exit_on_path_one(self):
+        before = self._p('a2_routing_moved.jsonl', 1)
+        after = self._p('a2_routing_fanout.jsonl', 1)
+        self.assertEqual('Path 2A', before['upper_exit_name'])
+        self.assertEqual('Path 2A + Path 2B', after['upper_exit_name'])
+        # The split and merge on Path 1 were untouched.
+        self.assertEqual(before['split_position'], after['split_position'])
+        self.assertEqual(before['merge_position'], after['merge_position'])
+
+    def test_fanning_out_removes_the_downstream_split(self):
+        """The unpredicted result, and the more useful one."""
+        before = self._p('a2_routing_moved.jsonl', 2)
+        after = self._p('a2_routing_fanout.jsonl', 2)
+        self.assertEqual(4, before['split_position'])
+        self.assertIsNone(after['split_position'])
+        # The merge stays: the two rows still rejoin at 7.
+        self.assertEqual(7, after['merge_position'])
+
+    def test_downstream_lower_row_is_still_populated(self):
+        from utils.preset_parser import SlotInfo
+        preset = self.caps['a2_routing_fanout.jsonl']
+        idxs = next(i for n, i in SlotInfo.ROWS if n == 'Path 2 lower')
+        occupied = [i for i in idxs
+                    if preset.slot_info[i] and any(preset.slot_info[i].id_to_names())]
+        self.assertTrue(occupied, 'the point of the test is a fed row with no split')
