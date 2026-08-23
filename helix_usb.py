@@ -184,6 +184,9 @@ class HelixUsb:
 		# Which setlist the device is on, learned from the singular
 		# preset-name reply. None until seen.
 		self.current_setlist = None
+		# A setlist the user is browsing in the UI, overriding the device's
+		# own. None means follow the device.
+		self.browse_setlist = None
 
 		self.excel_logger = None
 		self.packet_recorder = None

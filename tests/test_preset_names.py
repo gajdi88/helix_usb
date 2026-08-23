@@ -125,5 +125,37 @@ class SyntheticCaptureShapeTest(unittest.TestCase):
 			self.assertGreaterEqual(len(packet), 17, 'matcher needs at least one payload byte')
 
 
+class EmptyReenumerationTest(unittest.TestCase):
+	"""A failed re-enumeration must not wipe a good preset list.
+
+	The device serves the name list once per connection. A second request
+	returns nothing, and publishing that replaced all 128 names with
+	placeholders - which is exactly what the Refresh button did.
+	"""
+
+	def _mode(self):
+		from modes.request_preset_names import RequestPresetNames
+		from tests.replay import ReplayHelixUsb
+		helix = ReplayHelixUsb()
+		mode = RequestPresetNames(helix)
+		helix.active_mode = mode
+		return helix, mode
+
+	def test_existing_names_survive_an_empty_result(self):
+		helix, mode = self._mode()
+		helix.set_preset_names(['Real %d' % i for i in range(128)])
+		mode._finish_transfer()
+		self.assertEqual('Real 0', helix.preset_names[0])
+		self.assertNotIn(helix.PRESET_PLACEHOLDER_NAME, helix.preset_names)
+
+	def test_first_empty_result_still_publishes_placeholders(self):
+		"""With nothing to protect, an empty list is the honest answer."""
+		helix, mode = self._mode()
+		self.assertEqual([], helix.preset_names)
+		mode._finish_transfer()
+		self.assertEqual(128, len(helix.preset_names))
+		self.assertEqual(helix.PRESET_PLACEHOLDER_NAME, helix.preset_names[0])
+
+
 if __name__ == '__main__':
 	unittest.main()

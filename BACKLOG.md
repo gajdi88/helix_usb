@@ -166,43 +166,47 @@ Section extraction works and all 15 captures parse. Remaining, in order:
 - **`FootSwitchInfo` populates nothing.** The sections and their labels are
   extracted correctly; the field parser inside produces empty objects.
 - **Snapshot parameter values.** Names, the stored index and live changes all
-  work now; the ~628 bytes of per-snapshot parameter state do not.
+  work now; the ~628 bytes of per-snapshot parameter state do not. This is the
+  largest remaining unknown in preset data.
 - **Selecting a snapshot from the UI.** The snapshot row is display-only;
   making the pills clickable means writing device state, which needs asking
   first. The device presumably accepts a snapshot-select message — the one it
   *emits* on a press (`82 69 2a/2e 6a 81 5c <n> 44`) is the obvious starting
   point, but sending it is untested and unasked-for.
-- **Missing module ids** in `modules.py` (`cd02bb`, `cd02cd`, …).
-- **`to_string()` bank arithmetic** assumes 3 presets per bank; the LT has 4.
-- **Splits/merges and the 1→2 routing block** are still entirely unmodelled.
+- ~~Missing module ids in `modules.py`.~~ DONE — all seven read off the
+  device and added. Only `cd02c4` is approximate: reported as "an IR block",
+  so it is entered generically as `Impulse Response`.
+- ~~`to_string()` bank arithmetic.~~ DONE — four presets per bank, confirmed
+  by the device showing preset 24 as 7A.
+- ~~Splits/merges unmodelled.~~ DONE — `HxPreset.extract_routing()` reads
+  split and merge positions and exit destinations, confirmed by moving them on
+  the device. The **1→2 routing block** as a distinct entity is still not
+  modelled; only the path-level geometry is.
 
-### Original notes on the big job
-`utils/preset_parser.py::extract_footswitch_sections` does `data.index('0895')`
-and raises `ValueError` on LT presets (`0895` is an HX Stomp marker). This
-kills `modes/request_preset` in a worker thread on **every** startup — three
-tracebacks per run. Preset names are unaffected.
-
-The LT is structurally bigger than the Stomp everywhere the parser assumes
-size: two DSP paths with ~16 block positions plus splits/merges and a 1→2
-routing block (Stomp: one path of 8), 8 snapshots (3), 8+ footswitches (3),
-4 send/returns (1). Slot geometry lives in `next_gen_slot_parser.py`.
+### Original notes on the big job — mostly resolved
+The `data.index('0895')` crash is fixed and all captures parse; see CLAUDE.md
+for the LT's section markers. Of the size differences that made the Stomp
+parser wrong, block geometry (4 rows of 8) and snapshots (8) are now handled.
+**Footswitches (8+ vs 3) and send/returns (4 vs 1) are not.**
+`next_gen_slot_parser.py` and `next_gen_parser.py` are imported nowhere — dead
+code, left alone.
 
 ### Capture matrix for preset data
 All eight setlists are captured (`tests/fixtures/lt_setlist*.jsonl`), plus 14
 preset-data captures from setlist 2 (`tests/fixtures/presets/`), recorded
 2026-08-22 by MIDI PC within one session. All 14 verified distinct.
 
-Still missing, and **not obtainable by selecting presets alone**:
+Since resolved, because the parser now reads what those captures were meant to
+establish:
 
-- **Known block counts (1 / 8 / 16).** Block count cannot be determined from a
-  capture without the parser, so the recorded spread is uncharacterised. The
-  quickest way through: name presets whose block counts you already know (from
-  HX Edit), and capture those specifically.
-- **An empty preset.** Setlist 2 is fully populated. Setlists 1 and 3–6 have
-  "New Preset" at slot 127, but MIDI PC only moves within the device's *active*
-  setlist, so the device has to be switched to one of those first.
-- **A split path** and **all footswitches assigned** — same problem: no way to
-  confirm from the raw capture which presets have them.
+- ~~Known block counts.~~ Readable directly — count non-`0814c0` assignable
+  slots.
+- ~~An empty preset.~~ Captured (`sl3_preset127_empty.jsonl`), and it is the
+  control that validates the slot model.
+- ~~A split path.~~ Captured deliberately, three ways
+  (`a2_routing_baseline` / `_moved` / `_fanout`).
+- **All footswitches assigned** — still missing, and now the one that matters,
+  since `FootSwitchInfo` is the next parser gap.
 
 ### Leads from the preset-data captures
 Observations from an ASCII scan of the 14 captures, not from a parser:
@@ -210,9 +214,10 @@ Observations from an ASCII scan of the 14 captures, not from a parser:
 - Effect **block names appear as plain ASCII** (`Courtesan Flange`,
   `Scream 808`, `Tycoctavia Fuzz`, `10 Band Graphic`, `6 Switch Looper`).
   Best entry point for the block parser.
-- **Snapshot labels** appear the same way (`SNAPSHOT 1` … `SNAPSHOT 8`).
+- ~~Snapshot labels appear the same way.~~ Now parsed properly: `04
+  <0xA1+len>`, one per snapshot block.
 - **IR/cab references** appear as `!` + 32 hex chars; presets carrying them are
-  ~9.6KB against ~7.4KB for those without.
+  ~9.6KB against ~7.4KB for those without. Still unparsed.
 - **The preset name is *not* in the preset-data stream** — not as a `0x6D`
   string and not as raw ASCII. Don't go looking for it there.
 - Matching `modules.py` 3-byte `cdXXXX` ids against the raw stream **does not
@@ -220,30 +225,50 @@ Observations from an ASCII scan of the 14 captures, not from a parser:
   Chance collisions dominate at that pattern length; the ids must need
   surrounding framing to locate.
 
-### Extend the replay harness to RequestPreset
-`tests/replay.py` hardcodes `RequestPresetNames`. Preset-data fixtures need an
-equivalent entry point. The recorder, `ReplayHelixUsb` and the
-fixture-discovery pattern all carry over unchanged.
+### ~~Extend the replay harness to RequestPreset~~ DONE
+`tests/replay.py` now has `replay_preset_data()` and `replay_standard()`
+alongside `replay_preset_names()`, plus `preset_fixture_paths()` and
+`live_fixture_paths()`.
 
 ## UI
 
-### The signal chain is still HX Stomp shaped
-`helix_qt_ui.py` has `HX_STOMP_BLOCK_COUNT = 10`,
-`HX_STOMP_INPUT_SLOT_INDEX = 0`, `HX_STOMP_OUTPUT_SLOT_INDEX = 9` and
-`HX_STOMP_EFFECT_SLOT_INDICES = [1..8]`, with `_slot_index_map` built from
-them. The LT needs ~16 positions across two paths. Blocked on the parsing work
-above — there is nothing to display until preset data parses.
+### ~~The signal chain is still HX Stomp shaped~~ DONE
+Replaced with four rows of eight, fed by `HxPreset.to_layout()` through
+`HelixUsb.set_preset_layout()`. Category colours, bypass shading, per-row
+routing summaries, and connectors showing which rows actually carry signal.
+The `HX_STOMP_*` constants are gone; the legacy handlers that referenced them
+are neutralised because one of them wrote to the device.
 
-### No setlist picker
-The setlist is chosen by the `HELIX_SETLIST` env var at startup and the UI
-shows one setlist's 128 presets. The device holds 8 × 128 = 1024. A picker
-would need `RequestPresetNames` re-run on change.
+Still display-only. Bypassing or selecting a block from the UI would need send
+paths and has not been asked for.
+
+### Setlist picker — BLOCKED on re-enumeration
+The picker is built, populated with the setlist names, and opens on whichever
+setlist the device is on. It is **deliberately left disabled**, because the
+underlying request does not work twice.
+
+**The device serves the preset-name list once per connection.** A second
+`RequestPresetNames` in the same session returns nothing usable — verified
+2026-08-23 for both the active setlist and another, and after a 40s wait, so
+it is neither setlist-dependent nor a timing problem. Varying byte 13 of the
+request (`0x38 <id>`, which looked like a transfer id) made no difference.
+
+This is pre-existing and also broke the **Refresh Blocks/Presets** button,
+which silently replaced all 128 names with placeholders. Guarded now: an
+enumeration that decodes nothing keeps the existing list and warns.
+
+To unblock: work out what makes the request repeatable. Candidates are the
+session fields the request-preset path maintains (`maybe_session_no`,
+`preset_data_packet_double`), which the name request never touches, or
+capturing HX Edit switching setlists. Restarting with `HELIX_SETLIST=<0-7>`
+reads any setlist meanwhile.
 
 ### Audit for other hardcoded HX Stomp assumptions
-The 2026-08-22 bug was the UI keeping its own `PRESET_LIST_COUNT = 125` while
-`HelixUsb` had moved to 128 — the device sent 128 names and the list silently
-dropped three. That was a *duplicated constant*, so worth sweeping for others
-rather than waiting to trip over them.
+Three found and fixed so far, all the same shape — a Stomp constant left
+behind: the UI's own `PRESET_LIST_COUNT = 125`, `to_string()`'s three presets
+per bank, and enumeration defaulting to setlist 0. Worth a deliberate sweep
+rather than waiting to trip over the next one. `utils/simple_filter.py` and
+the `set_slot_info()` path still assume 16 slots.
 
 ## Robustness
 
@@ -274,6 +299,12 @@ device-agnostic and apply to `kempline/helix_usb`. Everything else assumes
 128-preset LT behaviour and fails on upstream's 125-preset tree. Must be a
 **separate branch cut from `upstream/main`**, dropping the fork-only CLAUDE.md
 hunk and resolving a one-line `.gitignore` conflict. Ask before preparing it.
+
+### Unidentified query `0x3e8`
+The second commented-out request array. Returns a 20-byte reply
+(`...83 66 cd 03 e8 67 00 68 c0 79 1b 6a`) with no names and no obvious
+payload. Its sibling `0x3e9` turned out to list setlist names, so this one is
+probably useful too.
 
 ### Ask upstream about the `ideas/` captures
 `ideas/` contains files named "18 Slots" and "20 Slots". Worth asking which

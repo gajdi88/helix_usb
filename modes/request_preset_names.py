@@ -33,6 +33,9 @@ class RequestPresetNames(Standard):
 				return int(forced) & 0x7
 			except ValueError:
 				log.warning('HELIX_SETLIST=%r is not a number; ignoring', forced)
+		browsing = getattr(self.helix_usb, 'browse_setlist', None)
+		if browsing is not None:
+			return browsing & 0x7
 		current = getattr(self.helix_usb, 'current_setlist', None)
 		if current is not None:
 			return current & 0x7
@@ -85,7 +88,17 @@ class RequestPresetNames(Standard):
 		self.transfer_complete = True
 		self._cancel_idle_watchdog()
 		self.parse_preset_names(finalize=True)
+		decoded = self._decoded_name_count()
 		self.decoded_preset_names = self._build_aligned_preset_names()
+
+		# The device serves the name list once per session: a second request
+		# returns nothing usable. Publishing that would replace a good list
+		# with 128 placeholders, which is what the Refresh button did.
+		if decoded == 0 and self.helix_usb.preset_names:
+			log.warning('Preset-name request decoded nothing; keeping the existing list. '
+						'The device only serves this list once per connection.')
+			self.helix_usb.switch_mode()
+			return
 
 		self.helix_usb.set_preset_names(self.decoded_preset_names)
 		for idx, name in enumerate(self.decoded_preset_names):

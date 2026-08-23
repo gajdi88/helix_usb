@@ -15,6 +15,7 @@ try:
 		QAbstractItemView,
 		QApplication,
 		QCheckBox,
+		QComboBox,
 		QFrame,
 		QGridLayout,
 		QHBoxLayout,
@@ -39,6 +40,7 @@ except ImportError:
 		QAbstractItemView,
 		QApplication,
 		QCheckBox,
+		QComboBox,
 		QFrame,
 		QGridLayout,
 		QHBoxLayout,
@@ -235,7 +237,9 @@ class HelixBridge(QObject):
 			self.helix.shutdown(self.usb_monitor)
 		self.status.emit("Shutdown complete")
 
-	def request_preset_names(self):
+	def request_preset_names(self, setlist=None):
+		"""Enumerate a setlist. None means whichever the device is on."""
+		self.helix.browse_setlist = setlist
 		self.status.emit("Requesting preset names")
 		self.helix.switch_mode("RequestPresetNames")
 
@@ -311,6 +315,8 @@ class MainWindow(QMainWindow):
 		self._slot_type_label_widgets = {}
 		self._slot_info_cache = {}
 		self._layout_rows = []
+		self._suppress_setlist_signal = False
+		self._browsing_setlist = None
 		self._selected_slot_no = 1
 
 		self._build_ui()
@@ -339,6 +345,20 @@ class MainWindow(QMainWindow):
 		preset_header.setObjectName("sectionHeader")
 		self.preset_header = preset_header
 		left_layout.addWidget(preset_header)
+
+		setlist_row = QHBoxLayout()
+		setlist_row.setSpacing(6)
+		setlist_row.addWidget(QLabel("Setlist"))
+		self.setlist_picker = QComboBox()
+		self.setlist_picker.setEnabled(False)
+		self.setlist_picker.setToolTip(
+			"Shows which setlist the device is on.\n"
+			"Browsing other setlists is not possible yet: the device serves the\n"
+			"preset-name list only once per connection, so a second request\n"
+			"returns nothing. Restart with HELIX_SETLIST=<0-7> to read another.")
+		self.setlist_picker.currentIndexChanged.connect(self._on_setlist_picked)
+		setlist_row.addWidget(self.setlist_picker, 1)
+		left_layout.addLayout(setlist_row)
 
 		self.preset_list = QListWidget()
 		self.preset_list.setAlternatingRowColors(True)
@@ -780,15 +800,50 @@ class MainWindow(QMainWindow):
 	def _on_snapshot_names_changed(self, _names):
 		self._refresh_snapshot_pills()
 
-	def _on_setlist_names_changed(self, _names):
+	def _on_setlist_names_changed(self, names):
+		"""Fill the picker. Blocked while repopulating so it does not fire."""
+		self._suppress_setlist_signal = True
+		try:
+			self.setlist_picker.clear()
+			for wire, name in enumerate(names):
+				self.setlist_picker.addItem(
+					'%d  %s' % (self.bridge.helix.setlist_display_number(wire), name), wire)
+			current = self.bridge.helix.current_setlist
+			# Show whichever the device is on, not simply the first entry.
+			if current is not None and 0 <= current < self.setlist_picker.count():
+				self.setlist_picker.setCurrentIndex(current)
+			# Deliberately left disabled -- see the tooltip. Re-enumeration
+			# does not work, so offering the choice would just mislead.
+			self.setlist_picker.setEnabled(False)
+		finally:
+			self._suppress_setlist_signal = False
+		self._refresh_setlist_caption()
+
+	def _on_setlist_picked(self, row):
+		if self._suppress_setlist_signal or row < 0:
+			return
+		wire = self.setlist_picker.itemData(row)
+		if wire is None:
+			return
+		# Browsing a setlist must not change what the device is playing, so
+		# this only re-runs the enumeration. No Program Change is sent.
+		self._browsing_setlist = wire
+		self._append_status('Loading %s' % self.bridge.helix.setlist_label(wire))
+		self.bridge.request_preset_names(setlist=wire)
 		self._refresh_setlist_caption()
 
 	def _refresh_setlist_caption(self):
-		current = self.bridge.helix.current_setlist
-		if current is None:
+		shown = self._browsing_setlist
+		if shown is None:
+			shown = self.bridge.helix.current_setlist
+		if shown is None:
 			self.preset_header.setText('Presets')
 			return
-		self.preset_header.setText('Presets — %s' % self.bridge.helix.setlist_label(current))
+		label = self.bridge.helix.setlist_label(shown)
+		if shown != self.bridge.helix.current_setlist:
+			# Make it obvious the list is not the setlist being played.
+			label += '  — not the active setlist'
+		self.preset_header.setText('Presets — %s' % label)
 
 	def _on_preset_names_changed(self, preset_names):
 		normalized_names = normalize_preset_names(preset_names)

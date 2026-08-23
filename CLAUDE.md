@@ -400,6 +400,12 @@ those came from before duplicating that work.
 - Lock in current behaviour with a fixture test before refactoring. 128 names
   from setlist 2 currently parse correctly — that is the regression baseline.
 
+**The preset-name list is served once per connection.** A second
+`RequestPresetNames` in the same session decodes nothing, for any setlist, at
+any delay. `_finish_transfer()` therefore keeps the existing list rather than
+replacing it with placeholders. To read a different setlist, restart with
+`HELIX_SETLIST=<0-7>`.
+
 ## Non-interactive testing
 
 Recording (needs the LT attached, DAW closed). `HELIX_RECORD` writes every
