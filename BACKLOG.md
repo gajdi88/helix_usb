@@ -55,8 +55,8 @@ splitting at packet boundaries). There is nowhere for a display index to hide.
    `modes/request_setlist_names.py`. `0x3e8` returns a 20-byte reply
    (`...83 66 cd 03 e8 67 00 68 c0 79 1b 6a`) with no names and no obvious
    payload — unidentified, possibly an ack or a status word.
-2. Capture HX Edit talking to the LT in the Windows VM while it renders the
-   preset list. It must obtain display order somehow.
+2. Capture HX Edit talking to the LT — see **Capture HX Edit against the LT**
+   below. It renders the list in display order, so it obtains it somehow.
 3. Ask upstream whether the Stomp's `0x6B`/`0x6C` record fields have a known
    LT equivalent.
 
@@ -71,6 +71,41 @@ arrangement and must be re-measured whenever a preset moves, it takes about
 four minutes, and the device stops announcing after a few dozen changes so it
 has to be done in passes. Finding the message HX Edit uses would still be
 better.
+
+### Capture HX Edit against the LT — unblocks two things at once
+
+The single highest-value experiment outstanding. HX Edit does two things over
+this same pipe that we cannot:
+
+1. **It shows presets in display order.** We can only read the storage index;
+   display order has to be brute-forced with a Program Change sweep, and the
+   result goes stale the moment a preset is moved. See the display-order
+   section above.
+2. **It re-reads preset lists without reconnecting.** Our
+   `RequestPresetNames` works exactly once per connection, which is why the
+   setlist picker is disabled and why the Refresh button had to be defused.
+
+Both are almost certainly the same gap: a message, or a field in a message, we
+have never captured. Watching HX Edit switch setlists would very likely show
+both.
+
+**How.** HX Edit runs in a Windows VM (the only write-capable path this
+project has). Capture the USB traffic on the Windows side — USBPcap plus
+Wireshark is the usual route — while doing three things in order: open the
+preset list, switch to a different setlist, then switch back. The third step
+matters: it forces a *second* read of a list already seen, which is exactly
+the case that fails for us.
+
+**What to look for.** A request resembling
+`83 66 cd 03 ea ... 82 6b <setlist>` (ours) but with different session or
+sequence fields, and whether the reply records carry anything beyond
+`0x81 0xCD` and the constant `0x84 0xCD` — upstream's HX Stomp records had
+`0x6B`/`0x6C` display coordinates in that position.
+
+**Caveat.** Only one process can hold the device, so the VM must have it and
+this tool must not be running. Passing USB through to a VM can be awkward, and
+nothing here is urgent — `HELIX_SETLIST=<0-7>` reads any setlist at startup in
+the meantime.
 
 ### Block parsing: plan as of 2026-08-23
 
@@ -260,8 +295,9 @@ enumeration that decodes nothing keeps the existing list and warns.
 To unblock: work out what makes the request repeatable. Candidates are the
 session fields the request-preset path maintains (`maybe_session_no`,
 `preset_data_packet_double`), which the name request never touches, or
-capturing HX Edit switching setlists. Restarting with `HELIX_SETLIST=<0-7>`
-reads any setlist meanwhile.
+capturing HX Edit switching setlists — see **Capture HX Edit against the LT**,
+which would likely answer this and the display-order problem together.
+Restarting with `HELIX_SETLIST=<0-7>` reads any setlist meanwhile.
 
 ### Audit for other hardcoded HX Stomp assumptions
 Three found and fixed so far, all the same shape — a Stomp constant left
