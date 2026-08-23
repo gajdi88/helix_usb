@@ -53,6 +53,19 @@ Key facts:
   `lt_setlist*.jsonl` fixture names) indexes them 0–7. "Setlist 4" on the
   front panel is wire index 3. Confirmed 2026-08-22: with the device switched
   to its setlist 4, the `0x6B 0xCD` tag read 3. Always say which you mean.
+- **Setlists are named, and the operator uses the names.** Query `0x3e9`
+  (`modes/request_setlist_names.py`) returns them; `HelixUsb.setlist_label(n)`
+  renders `USER 1 (setlist 3)`. On this device:
+
+  | wire | shown | name | | wire | shown | name |
+  |---|---|---|---|---|---|---|
+  | 0 | 1 | FACTORY 1 | | 4 | 5 | Send1 |
+  | 1 | 2 | FACTORY 2 | | 5 | 6 | ExtCab |
+  | 2 | 3 | **USER 1** | | 6 | 7 | **USER 5** |
+  | 3 | 4 | USER 2 | | 7 | 8 | TEMPLATES |
+
+  "USER 5" is wire 6, shown as setlist 7 — **not** setlist 5. All preset-data
+  captures came from **USER 1**; the empty-preset capture from **USER 2**.
 - Preset indices are absolute: `setlist * 128 + slot`. Setlist 2 slot 25
   arrives as `0x81 0xCD 0x01 0x19` (281).
 - **Entries arrive out of order.** Always key on the index, never on arrival
