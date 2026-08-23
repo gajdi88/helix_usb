@@ -258,7 +258,7 @@ topology the operator read off the device, against serial presets:
 |---|---|---|---|
 | `split_position` | in-lower, marker `0x0d` | position the path splits at. **1** = the very start, **0** = no split | confirmed |
 | `merge_position` | out-lower, `cc97 0d <n>` | position the branch rejoins at. **9** = the path output, 1–8 = blocks | confirmed |
-| `merge_flag` | out-lower, marker `0x06` | unknown | **not understood** |
+| `upper_exit` / `lower_exit` | out-upper / out-lower, marker `0x06` | destination of that chain's exit node | partly understood |
 
 **Confirmed by experiment, not correlation.** The operator duplicated a preset
 onto an empty slot, built a known topology, then moved both splits and both
@@ -266,19 +266,25 @@ merges and re-captured (`a2_routing_baseline.jsonl`, `a2_routing_moved.jsonl`).
 Predictions were written down before each capture was parsed and matched every
 time: Path 2 split 5→4 and merge 6→7, Path 1 split 5→1 and merge none→9.
 
-**`merge_flag` is not understood.** Observed 0, 1, 2 and 12. It reads 1 on a
-path whose branches end in different places (upper feeding the next path,
-lower going straight to the output) and 0 once both merge again, so it may
-describe branch destinations. 2 and 12 have no explanation.
+**Exit nodes.** Every chain ends in an exit node — a node, not a block — whose
+property sets where its signal goes: another path, both of them, or a physical
+output (XLR, TRS…). Marker `0x06` on the chain's output endpoint carries it.
+This was originally mis-modelled as a "merge flag", which is why its values
+never fitted a merge story.
 
-An earlier reading of flag 2 as "merges at the output" was **disproved** by
-A2 — a merge at the end is stored as position 9. Preset 24's Path 1 still
-reports a split with no merge position and flag 2, which remains unexplained.
+| Value | Meaning |
+|---|---|
+| 0 | merged into the other chain, no separate exit |
+| 1 | Multi output |
+| 2 | Path 2A |
+| 6, 12 | observed, unexplained |
 
-Also unexplained: presets 84, 125 and 127 carry a populated Path 2 lower row
-with no split at all (flags 12, 12, 1). Most likely those rows are fed from
-the previous path rather than by a split — the A2 preset does exactly that on
-Path 1 — but it is not established.
+1 and 2 are confirmed twice over, in opposite arrangements: preset 24 has Path
+1 upper → "output to multi" and lower → "output to path A", while the A2
+baseline has them the other way round. Merging a chain sets its exit to 0.
+
+An earlier reading of value 2 as "merges at the output" was **disproved** by
+A2 — a merge at the end is stored as merge position 9.
 
 This is the **big remaining job**: block/slot and footswitch parsing. The LT
 has two DSP paths with ~16 block positions plus splits/merges and a 1→2

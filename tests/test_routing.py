@@ -218,3 +218,71 @@ class RoutingFalsificationTest(unittest.TestCase):
                     self.assertEqual(
                         [n[1] for n in before.id_to_names() if n] if before else None,
                         [n[1] for n in after.id_to_names() if n] if after else None)
+
+
+class ExitDestinationTest(unittest.TestCase):
+    """Each chain ends in an exit node whose property is its destination.
+
+    Explained by the operator from the device UI: the node after the last
+    merge on a chain has a property setting where its signal goes -- another
+    path, both of them, or a physical output such as XLR or TRS. That is what
+    marker 0x06 on the chain's output endpoint carries. It had been
+    mis-modelled as a merge flag, which is why values 1, 2, 6 and 12 never
+    fitted a merge story.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.caps = {os.path.basename(p): replay_preset_data(p).hx_preset
+                    for p in preset_fixture_paths()}
+        if not cls.caps:
+            raise unittest.SkipTest('no preset-data fixtures')
+
+    def _p(self, fixture, path_no):
+        return next(e for e in self.caps[fixture].routing if e['path'] == path_no)
+
+    def test_preset24_exits_match_the_operator_reading(self):
+        """Path 1 upper ended in "output to multi", lower in "output to path A"."""
+        p1 = self._p('sl2_preset024.jsonl', 1)
+        self.assertEqual('Multi output', p1['upper_exit_name'])
+        self.assertEqual('Path 2A', p1['lower_exit_name'])
+
+    def test_a2_baseline_exits_are_the_other_way_round(self):
+        """1A fed Path 2A while 1B went straight to the output.
+
+        The reverse of preset 24, so the two readings corroborate rather than
+        restate each other.
+        """
+        p1 = self._p('a2_routing_baseline.jsonl', 1)
+        self.assertEqual('Path 2A', p1['upper_exit_name'])
+        self.assertEqual('Multi output', p1['lower_exit_name'])
+
+    def test_merging_a_chain_clears_its_exit(self):
+        """After Path 1 was merged at the end, the lower chain has no exit."""
+        before = self._p('a2_routing_baseline.jsonl', 1)
+        after = self._p('a2_routing_moved.jsonl', 1)
+        self.assertEqual('Multi output', before['lower_exit_name'])
+        self.assertEqual('merged', after['lower_exit_name'])
+        self.assertEqual('Path 2A', after['upper_exit_name'])
+
+    def test_the_last_path_usually_reaches_a_physical_output(self):
+        # Path 2 upper is the end of the chain in nearly every preset.
+        names = [self._p(f, 2)['upper_exit_name'] for f in self.caps]
+        self.assertGreater(names.count('Multi output'), len(names) * 0.8)
+
+    def test_unknown_values_are_reported_not_hidden(self):
+        self.assertEqual('unknown (12)', HxPreset.exit_destination_name(12))
+        self.assertIsNone(HxPreset.exit_destination_name(None))
+
+    def test_a_merged_lower_chain_never_also_has_an_exit(self):
+        """0 means merged, so it should not co-occur with a merge position
+        pointing somewhere else... except it can, and that is the point:
+        assert only that the value is one we have seen, so a new one surfaces
+        as a failure rather than being silently renamed 'unknown'.
+        """
+        seen = {0, 1, 2, 6, 12}
+        for name, preset in self.caps.items():
+            for entry in preset.routing:
+                for key in ('upper_exit', 'lower_exit'):
+                    with self.subTest(fixture=name, path=entry['path'], field=key):
+                        self.assertIn(entry[key], seen)

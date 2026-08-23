@@ -601,7 +601,39 @@ class HxPreset:
     # block positions. Confirmed by moving a merge to the very end and
     # re-capturing.
     MERGE_AT_OUTPUT_POSITION = 9
+
+    # Every chain ends in an exit node whose property is its destination --
+    # another path, or a physical output. Marker 0x06 on the chain's output
+    # endpoint carries it (named unknown_2_x01 in FIELD_MAP_01 for upper
+    # chains and unknown_3 in FIELD_MAP_03 for lower ones).
+    #
+    # Values 1 and 2 are confirmed by the operator's reading of preset 24,
+    # where Path 1 upper ended in "output to multi" and Path 1 lower in
+    # "output to path A", and corroborated by the A2 baseline where the two
+    # were the other way round. 6 and 12 are observed but unexplained.
+    EXIT_DESTINATIONS = {
+        0: 'merged',
+        1: 'Multi output',
+        2: 'Path 2A',
+    }
     SNAPSHOT_NAME_PREFIX = 0x04
+
+    @staticmethod
+    def exit_destination(output_slot):
+        """Raw destination value of a chain's exit node, or None."""
+        if output_slot is None:
+            return None
+        for attr in ('unknown_2_x01', 'unknown_3'):
+            value = getattr(output_slot, attr, None)
+            if isinstance(value, int):
+                return value
+        return None
+
+    @staticmethod
+    def exit_destination_name(value):
+        if value is None:
+            return None
+        return HxPreset.EXIT_DESTINATIONS.get(value, 'unknown (%d)' % value)
 
     @staticmethod
     def _merge_position(out_lower_slot):
@@ -651,13 +683,21 @@ class HxPreset:
         for path_no, (_in_up, _out_up, in_lower, out_lower) in SlotInfo.PATH_ENDPOINTS:
             lower_in = self.slot_info[in_lower] if in_lower < len(self.slot_info) else None
             lower_out = self.slot_info[out_lower] if out_lower < len(self.slot_info) else None
+            upper_out = self.slot_info[_out_up] if _out_up < len(self.slot_info) else None
             merge = (self._merge_position(lower_out) or None) if lower_out else None
+            upper_exit = self.exit_destination(upper_out)
+            lower_exit = self.exit_destination(lower_out)
             routing.append({
                 'path': path_no,
                 'split_position': (getattr(lower_in, 'split_position', 0) or 0) or None,
                 'merge_position': merge,
                 'merges_at_output': merge == HxPreset.MERGE_AT_OUTPUT_POSITION,
-                'merge_flag': getattr(lower_out, 'unknown_3', None),
+                'upper_exit': upper_exit,
+                'upper_exit_name': self.exit_destination_name(upper_exit),
+                'lower_exit': lower_exit,
+                'lower_exit_name': self.exit_destination_name(lower_exit),
+                # Retained under its old name until every value is explained.
+                'merge_flag': lower_exit,
             })
         return routing
 
