@@ -384,6 +384,14 @@ class PresetSelectionMappingTest(unittest.TestCase):
     """
 
     def test_preset_fixtures_declare_how_they_were_selected(self):
+        """Names were unreliable until the display order was measured.
+
+        They came from the storage index while the captures were selected by
+        Program Change (display position). The sweep in
+        tests/fixtures/live/display_order_sweep.jsonl resolved it, so they are
+        now labelled from display order and marked reliable. See
+        tests/test_display_order.py for the check that they actually match.
+        """
         import glob
         import json
         for path in glob.glob('tests/fixtures/presets/sl2_preset*.jsonl'):
@@ -391,8 +399,8 @@ class PresetSelectionMappingTest(unittest.TestCase):
                 meta = json.loads(fh.readline())
             with self.subTest(fixture=os.path.basename(path)):
                 self.assertIn('Program Change', meta.get('selected_by', ''))
-                self.assertFalse(meta.get('preset_name_reliable', True),
-                                 'storage-index name must not be presented as reliable')
+                self.assertTrue(meta.get('preset_name_reliable'))
+                self.assertIn('display slot', meta.get('preset_name_source', ''))
 
     def test_storage_index_and_display_slot_disagree(self):
         """Guards the finding itself: if they ever agree again, revisit this."""

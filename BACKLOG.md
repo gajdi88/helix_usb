@@ -60,10 +60,17 @@ splitting at packet boundaries). There is nowhere for a display index to hide.
 3. Ask upstream whether the Stomp's `0x6B`/`0x6C` record fields have a known
    LT equivalent.
 
-**Workaround if it stays unsolved.** Display order can be measured by sending
-Program Change 0-127 and reading back each name, roughly 128 x 3s. Slow, but
-it produces a real storage-to-display map, and it only needs redoing when
-presets are moved.
+**Measured 2026-08-23.** The Program Change sweep works and is now the way to
+read display order: the device announces every change unprompted with number
+and name, so PC 0-127 yields the full map
+(`tests/fixtures/live/display_order_sweep.jsonl`). It confirmed every slot the
+operator had read and let the preset-data fixtures be relabelled correctly.
+
+It is a workaround, not a solution. The map describes the *current*
+arrangement and must be re-measured whenever a preset moves, it takes about
+four minutes, and the device stops announcing after a few dozen changes so it
+has to be done in passes. Finding the message HX Edit uses would still be
+better.
 
 ### Block parsing: plan as of 2026-08-23
 

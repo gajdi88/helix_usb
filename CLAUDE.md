@@ -253,8 +253,21 @@ same moment, two numbering systems.
 
 **Display position is not present in the name-list message.** Its records carry
 exactly two 16-bit fields, `0x81 0xCD` (storage index) and `0x84 0xCD` (constant
-zero). There is currently **no known way to read display order over the wire**;
-HX Edit presumably uses a message we have not captured.
+zero). Upstream's HX Stomp code read `0x6B`/`0x6C` from inside each record —
+display coordinates — but the LT does not send them.
+
+**Display order can be measured, though, by sweeping Program Change.** The
+device announces every preset change unprompted with its number (`0x6C`) and
+name (`0x6D`), so sending PC 0–127 and collecting the announcements yields the
+full map. Done 2026-08-23 for USER 1
+(`tests/fixtures/live/display_order_sweep.jsonl`); it matched every slot the
+operator had read off the device, and the preset-data fixtures are now
+labelled from it.
+
+Two practical notes. **The device stops announcing after a few dozen changes**
+and needs time to recover — the sweep took four passes at 1.5s per step, with
+15s between them. And the resulting map is a fact about the *current*
+arrangement: moving any preset invalidates it, so it must be re-measured.
 
 **MIDI Program Change selects by display position**, not storage index.
 Established 2026-08-23: the operator named the Path 2 output of three presets
@@ -269,10 +282,10 @@ Consequences:
 - `bank = index // 4 + 1`, `letter = index % 4` converts a *storage* index to a
   label, which is only the displayed slot when nothing has been moved. Do not
   present it to the user as the device's slot without saying so.
-- The `preset_name` on `tests/fixtures/presets/sl2_preset*.jsonl` came from the
-  storage index and is **unreliable**; the fixtures are flagged
-  `preset_name_reliable: false`. The captured bytes are unaffected.
-- There is no known way yet to read the display order over the wire.
+- The `preset_name` on `tests/fixtures/presets/sl2_preset*.jsonl` originally
+  came from the storage index and was wrong for everything after the move.
+  Corrected 2026-08-23 from the Program Change sweep and now flagged
+  `preset_name_reliable: true`.
 
 ### Block layout — confirmed against the device 2026-08-23
 
