@@ -139,18 +139,37 @@ class RequestPreset(Standard):
 
 
 		# splitter for the labels: 87 0A 00 0B 84 00 03 05 A9
-		# active snapshot information:
-		if '860600070208' in nice_str and self.helix_usb.current_snapshot != 1:
-			self.helix_usb.set_snapshot(1)
-		elif '860601070208' in nice_str and self.helix_usb.current_snapshot != 2:
-			self.helix_usb.set_snapshot(2)
-		elif '860602070208' in nice_str and self.helix_usb.current_snapshot != 3:
-			self.helix_usb.set_snapshot(3)
+		# Active snapshot. The HX Stomp encodes it as 8606 0N 07 02 08, which
+		# never occurs on the LT; the LT emits exactly one 8606 record whose
+		# third byte is the 0-based snapshot index. Confirmed by capturing the
+		# same preset on snapshot 1 (00) and snapshot 3 (02).
+		snapshot = self.extract_active_snapshot(nice_str)
+		if snapshot is not None:
+			self.helix_usb.set_snapshot(snapshot)
 
 		self.helix_usb.got_preset = True
 		self.helix_usb.switch_mode()
 
 		return True  # print incoming message to console
+
+	def extract_active_snapshot(self, nice_str):
+		"""1-based active snapshot index from the preset payload, or None.
+
+		Every Helix LT capture carries exactly one byte-aligned `8606` record:
+
+            8606 <0-based snapshot> 07 00 08 ...
+
+        Byte alignment matters -- this is a nibble-indexed hex string, so an
+        odd-offset match would read the wrong byte entirely.
+		"""
+		for i in range(0, len(nice_str) - 5, 2):
+			if nice_str[i:i + 4] == '8606':
+				index = int(nice_str[i + 4:i + 6], 16)
+				if index < self.helix_usb.SNAPSHOT_COUNT:
+					return index + 1
+				log.warning('Snapshot index %d out of range in preset data', index)
+				return None
+		return None
 
 	def data_in(self, data_in):
 

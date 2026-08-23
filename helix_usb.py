@@ -92,6 +92,9 @@ class HelixUsb:
 		"EmulateFS5": 53
 	}
 
+	# The Helix LT has 8 snapshots; the HX Stomp has 3.
+	SNAPSHOT_COUNT = 8
+
 	MIDI_PROGRAM_MIN = 0
 	MIDI_PROGRAM_MAX = 127
 	MIDI_PROGRAM_CHANGE_CHANNEL = 0  # MIDI ch1, zero-based in status byte
@@ -284,7 +287,14 @@ class HelixUsb:
 		self.slot_data = slot_info_list
 
 	def set_snapshot(self, current_snapshot):
+		if not (1 <= current_snapshot <= HelixUsb.SNAPSHOT_COUNT):
+			log.warning('Ignoring out-of-range snapshot %s (expected 1..%d)',
+						current_snapshot, HelixUsb.SNAPSHOT_COUNT)
+			return
+		if current_snapshot == self.current_snapshot:
+			return
 		self.current_snapshot = current_snapshot
+		log.info('Snapshot changed to %d', current_snapshot)
 		for cb_fct in self.snapshot_change_cb_fct_list:
 			cb_fct(self.current_snapshot)
 

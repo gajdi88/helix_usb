@@ -112,17 +112,42 @@ preset 96 gives `spring`, `dd`, `deluxe`.
 Eight blocks of ~628 bytes is most of the payload, which is why preset data is
 ~7–10KB.
 
+**Active snapshot — stored (2026-08-23).** The Stomp's `8606 0N 07 02 08` never
+occurs on the LT. Every LT capture holds exactly one byte-aligned `8606`
+record whose **third byte is the 0-based snapshot index**:
+
+```
+8606 <0-based snapshot> 07 00 08 ...
+```
+
+Confirmed by experiment, not inference: the same preset captured on snapshot 1
+reads `00`, on snapshot 3 reads `02`. Read by
+`RequestPreset.extract_active_snapshot()`.
+
+**Active snapshot — live (2026-08-23).** Pressing a snapshot on the device
+emits **two** 32-byte messages, `data[26]` of `0x2a` then `0x2e`, both carrying
+the same 0-based index at `data[30]`:
+
+```
+17 00 00 18 f0 03 02 10 00 XX 00 04 09 02 00 00
+00 00 04 00 07 00 00 00 82 69 <2a|2e> 6a 81 5c <0-based> 44
+```
+
+Handled in `modes/standard.py`. Two things matter there:
+
+- It **must sit ahead of the generic `0x17`/`0xf0` handler**, which shares the
+  same first 16 bytes and would otherwise swallow it.
+- It must send the same `0x74 0x77` acknowledgement that generic handler sends,
+  since it consumes a packet that would otherwise reach it.
+
+`set_snapshot()` ignores a repeat of the current value, so the paired
+`0x2a`/`0x2e` messages do not double-fire. `HelixUsb.SNAPSHOT_COUNT` is 8.
+
 Still broken in preset data:
 
-- **The active snapshot is still unknown.** The Stomp reads it from
-  `8606 0N 07 02 08`; that exact sequence is absent, but every LT capture has
-  exactly one `8606` record reading `8606 <A> 07 00 08 <B> 09 28 0a 98 89`.
-  Byte `A` sits where the Stomp's index sits and varies 0–2 across captures,
-  so it is the prime candidate — **unconfirmed**, and byte `B` also varies
-  independently. Settle it by capturing one preset at two different snapshots.
-  Separately, live snapshot tracking needs a message we have never captured;
-  preset data only records what was saved. Also, the existing code handles
-  only snapshots 1–3 against the LT's 8.
+- Snapshot **parameter values** are still unparsed — only names, the stored
+  index and live changes are handled. Each snapshot block is ~628 bytes of
+  per-block parameter state that nothing reads yet.
 - **`FootSwitchInfo` yields empty objects.** Section extraction is correct and
   the labels are in the bytes (`Kinky Boost`, `6 Switch Looper`), but the
   field parser populates no attributes, so nothing surfaces. Next layer down.

@@ -20,11 +20,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from helix_usb import HelixUsb
 from modes.request_preset import RequestPreset
 from modes.request_preset_names import RequestPresetNames
+from modes.standard import Standard
 from utils.formatter import format_1
 from utils.packet_recorder import load_capture
 
 FIXTURE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures')
 PRESET_FIXTURE_DIR = os.path.join(FIXTURE_DIR, 'presets')
+LIVE_FIXTURE_DIR = os.path.join(FIXTURE_DIR, 'live')
 
 
 class ReplayHelixUsb(HelixUsb):
@@ -212,6 +214,66 @@ def fixture_paths():
 	return sorted(
 		os.path.join(FIXTURE_DIR, name)
 		for name in os.listdir(FIXTURE_DIR)
+		if name.endswith('.jsonl')
+	)
+
+
+class StandardResult(object):
+    def __init__(self, meta, packets, helix, snapshots, warnings):
+        self.meta = meta
+        self.packets = packets
+        self.helix = helix
+        self.snapshots = snapshots        # every set_snapshot value, in order
+        self.warnings = warnings
+
+    @property
+    def expect(self):
+        return self.meta.get('expect', {})
+
+
+def replay_standard(capture_path):
+	"""Feed a live session capture through Standard mode.
+
+	Standard is where the device's unsolicited UI events land -- snapshot
+	changes, preset switches, view changes -- so this is the harness for
+	captures recorded while someone operates the front panel.
+	"""
+	meta, packets = load_capture(capture_path)
+
+	collector = _WarningCollector()
+	root = logging.getLogger()
+	saved_handlers, saved_level = root.handlers[:], root.level
+	root.handlers = [collector]
+	root.setLevel(logging.WARNING)
+
+	helix = ReplayHelixUsb()
+	snapshots = []
+	helix.register_snapshot_change_cb_fct(snapshots.append)
+	helix.active_mode = Standard(helix, name='standard')
+
+	try:
+		with contextlib.redirect_stdout(io.StringIO()):
+			for packet in packets:
+				if packet.get('ep', '0x81') != '0x81':
+					continue
+				try:
+					helix.data_in('0x81', packet['bytes'])
+				except Exception:      # noqa: BLE001
+					# Standard mode is not the mode these packets were sent
+					# for; a handler tripping must not stop the replay.
+					pass
+	finally:
+		root.handlers, root.level = saved_handlers, saved_level
+
+	return StandardResult(meta, packets, helix, snapshots, collector.messages)
+
+
+def live_fixture_paths():
+	if not os.path.isdir(LIVE_FIXTURE_DIR):
+		return []
+	return sorted(
+		os.path.join(LIVE_FIXTURE_DIR, name)
+		for name in os.listdir(LIVE_FIXTURE_DIR)
 		if name.endswith('.jsonl')
 	)
 
