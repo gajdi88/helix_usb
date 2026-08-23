@@ -41,11 +41,17 @@ class RoutingTest(unittest.TestCase):
                 self.assertEqual([1, 2], [e['path'] for e in preset.routing])
 
     def test_preset24_path1_matches_the_device(self):
-        """Y split after block 4, merging at the output."""
+        """Y split after block 4. The merge is not represented as a position.
+
+        The operator described a merge "just before the very end" here, but no
+        merge position is recorded and merge_flag reads 2. Since A2 showed a
+        merge at the end is stored as position 9, flag 2 means something else
+        that is still unexplained.
+        """
         p1 = self._path('sl2_preset024.jsonl', 1)
         self.assertEqual(5, p1['split_position'])
-        self.assertTrue(p1['merges_at_output'])
         self.assertIsNone(p1['merge_position'])
+        self.assertEqual(2, p1['merge_flag'])
 
     def test_preset24_path2_matches_the_device(self):
         """A/B split at 3, merging back at 5, before Plate."""
@@ -111,10 +117,13 @@ class RoutingTest(unittest.TestCase):
                         continue
                     with self.subTest(fixture=name, path=entry['path'], field=key):
                         self.assertGreaterEqual(value, 1)
-                        self.assertLessEqual(value, 8)
+                        # 9 is the path output, a legal merge target.
+                        self.assertLessEqual(value, 9)
 
-    def test_merge_at_output_flag_value(self):
-        self.assertEqual(2, HxPreset.MERGE_AT_OUTPUT)
+    def test_merge_at_output_is_position_nine(self):
+        self.assertEqual(9, HxPreset.MERGE_AT_OUTPUT_POSITION)
+        moved = self._path('a2_routing_moved.jsonl', 1)
+        self.assertTrue(moved['merges_at_output'])
 
     def test_a_populated_lower_row_always_shows_routing(self):
         """Cross-check against the slot data, parsed from a different place.
@@ -163,3 +172,49 @@ class RoutingTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RoutingFalsificationTest(unittest.TestCase):
+    """A2: the same preset captured before and after moving its routing.
+
+    This is the only evidence that the fields mean what they are named rather
+    than correlating by chance on presets that happened to exist. Predictions
+    were written down before either capture was parsed.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.caps = {os.path.basename(p): replay_preset_data(p).hx_preset
+                    for p in preset_fixture_paths()}
+        for needed in ('a2_routing_baseline.jsonl', 'a2_routing_moved.jsonl'):
+            if needed not in cls.caps:
+                raise unittest.SkipTest('missing %s' % needed)
+
+    def _routing(self, fixture):
+        return {e['path']: e for e in self.caps[fixture].routing}
+
+    def test_edits_moved_the_recorded_values(self):
+        before = self._routing('a2_routing_baseline.jsonl')
+        after = self._routing('a2_routing_moved.jsonl')
+
+        # Path 2: split one position left, merge one position right.
+        self.assertEqual((5, 6), (before[2]['split_position'], before[2]['merge_position']))
+        self.assertEqual((4, 7), (after[2]['split_position'], after[2]['merge_position']))
+
+        # Path 1: split moved to the very start, merge added at the very end.
+        self.assertEqual(5, before[1]['split_position'])
+        self.assertIsNone(before[1]['merge_position'])
+        self.assertEqual(1, after[1]['split_position'])
+        self.assertEqual(9, after[1]['merge_position'])
+
+    def test_blocks_did_not_move(self):
+        """Only routing changed, so the block layout must be identical."""
+        from utils.preset_parser import SlotInfo
+        for _name, idxs in SlotInfo.ROWS:
+            for i in idxs:
+                before = self.caps['a2_routing_baseline.jsonl'].slot_info[i]
+                after = self.caps['a2_routing_moved.jsonl'].slot_info[i]
+                with self.subTest(slot=i):
+                    self.assertEqual(
+                        [n[1] for n in before.id_to_names() if n] if before else None,
+                        [n[1] for n in after.id_to_names() if n] if after else None)

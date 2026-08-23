@@ -254,26 +254,31 @@ Splits and merges are not slots; they live in the chain-endpoint segments.
 `HxPreset.extract_routing()` reads them. Derived by diffing preset 24, whose
 topology the operator read off the device, against serial presets:
 
-| Field | Where | Meaning |
-|---|---|---|
-| `split_position` | in-lower, marker `0x0d` | upper-row position the path splits at; 0 = none |
-| `merge_position` | out-lower, `cc97 0d <n>` | upper-row position the branch rejoins at |
-| `merge_flag` | out-lower, marker `0x06` | 2 = rejoins at the path output |
+| Field | Where | Meaning | Status |
+|---|---|---|---|
+| `split_position` | in-lower, marker `0x0d` | position the path splits at. **1** = the very start, **0** = no split | confirmed |
+| `merge_position` | out-lower, `cc97 0d <n>` | position the branch rejoins at. **9** = the path output, 1–8 = blocks | confirmed |
+| `merge_flag` | out-lower, marker `0x06` | unknown | **not understood** |
 
-Preset 24 comes out as Path 1 split at 5 rejoining at the output, Path 2 split
-at 3 rejoining at 5 — matching the operator's description exactly. Across all
-fixtures, every split has either a merge position or the output flag, never
-neither.
+**Confirmed by experiment, not correlation.** The operator duplicated a preset
+onto an empty slot, built a known topology, then moved both splits and both
+merges and re-captured (`a2_routing_baseline.jsonl`, `a2_routing_moved.jsonl`).
+Predictions were written down before each capture was parsed and matched every
+time: Path 2 split 5→4 and merge 6→7, Path 1 split 5→1 and merge none→9.
 
-**Not settled.** `merge_flag` also takes values 1 and 12, on paths whose lower
-row is populated from position 1 with `split_position` unset (presets 84, 125,
-127). Those are probably paths that split at the *input* rather than mid-row,
-so the mode lives in the flag — but that is a guess from three presets. It was
-caught by cross-checking routing against the slot data, which are parsed from
-different places.
+**`merge_flag` is not understood.** Observed 0, 1, 2 and 12. It reads 1 on a
+path whose branches end in different places (upper feeding the next path,
+lower going straight to the output) and 0 once both merge again, so it may
+describe branch destinations. 2 and 12 have no explanation.
 
-None of this is confirmed until a split is moved on the device and
-re-captured (plan item A2 in `BACKLOG.md`).
+An earlier reading of flag 2 as "merges at the output" was **disproved** by
+A2 — a merge at the end is stored as position 9. Preset 24's Path 1 still
+reports a split with no merge position and flag 2, which remains unexplained.
+
+Also unexplained: presets 84, 125 and 127 carry a populated Path 2 lower row
+with no split at all (flags 12, 12, 1). Most likely those rows are fed from
+the previous path rather than by a split — the A2 preset does exactly that on
+Path 1 — but it is not established.
 
 This is the **big remaining job**: block/slot and footswitch parsing. The LT
 has two DSP paths with ~16 block positions plus splits/merges and a 1→2

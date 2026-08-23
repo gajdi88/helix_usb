@@ -597,9 +597,10 @@ class HxPreset:
     # The Helix LT stores eight snapshots; the HX Stomp three.
     SNAPSHOT_COUNT = 8
     PRESETS_PER_BANK = 4
-    # merge_flag value meaning "the lower branch rejoins at the path output"
-    # rather than at a numbered position.
-    MERGE_AT_OUTPUT = 2
+    # Merge position 9 means the branch rejoins at the path output; 1-8 are
+    # block positions. Confirmed by moving a merge to the very end and
+    # re-capturing.
+    MERGE_AT_OUTPUT_POSITION = 9
     SNAPSHOT_NAME_PREFIX = 0x04
 
     @staticmethod
@@ -627,37 +628,36 @@ class HxPreset:
     def extract_routing(self):
         """Split and merge geometry per DSP path.
 
-        PROVISIONAL. Derived 2026-08-23 by diffing preset 24, whose topology
-        the operator read off the device, against two serial presets:
+        `split_position` and `merge_position` are CONFIRMED. On 2026-08-23 the
+        operator built a preset specifically to test this, then moved both on
+        both paths and re-captured. Predicted values matched the edits every
+        time:
 
-          * `split_position` on the in-lower endpoint is the upper-row position
-            where the path splits; 0 means no split. Preset 24 gives 5 and 3,
-            matching the Y split after Path 1 block 4 and the A/B split on
-            Path 2. Serial presets give 0.
-          * `merge_position` comes from `cc97 0d <n>` in the out-lower blob:
-            the upper-row position the branch rejoins at. Path 2 of preset 24
-            gives 5, matching the merge before Plate.
-          * `merge_flag` 2 means the branch instead rejoins at the path
-            output. Preset 24's Path 1 reads it, matching the operator's
-            "merge mixer just before the very end". Across the fixtures every
-            split has either a merge position or this flag, never neither.
+          * `split_position` (in-lower, marker 0x0d) is the upper-row position
+            at which the path splits. 1 is the very start of the path, 0 means
+            no split at all.
+          * `merge_position` (out-lower, `cc97 0d <n>`) is the position the
+            branch rejoins at. 9 means the path output; 1-8 are blocks.
 
-        Flag values 1 and 12 occur on paths with no split and are unexplained.
-
-        Both rest on three presets agreeing, and are not confirmed until a
-        split is moved on the device and re-captured.
+        `merge_flag` (out-lower, marker 0x06) is NOT understood. Observed
+        values 0, 1, 2 and 12. It reads 1 on a path whose two branches end in
+        different places (upper feeding the next path, lower going straight to
+        the output) and 0 once both branches merge again, so it plausibly
+        describes branch destinations - but 2 and 12 have no explanation, and
+        an earlier reading of 2 as "merges at the output" was disproved: that
+        case is a merge position of 9.
         """
         routing = []
         for path_no, (_in_up, _out_up, in_lower, out_lower) in SlotInfo.PATH_ENDPOINTS:
             lower_in = self.slot_info[in_lower] if in_lower < len(self.slot_info) else None
             lower_out = self.slot_info[out_lower] if out_lower < len(self.slot_info) else None
-            flag = getattr(lower_out, 'unknown_3', None)
+            merge = (self._merge_position(lower_out) or None) if lower_out else None
             routing.append({
                 'path': path_no,
                 'split_position': (getattr(lower_in, 'split_position', 0) or 0) or None,
-                'merge_position': (self._merge_position(lower_out) or None) if lower_out else None,
-                'merges_at_output': flag == HxPreset.MERGE_AT_OUTPUT,
-                'merge_flag': flag,
+                'merge_position': merge,
+                'merges_at_output': merge == HxPreset.MERGE_AT_OUTPUT_POSITION,
+                'merge_flag': getattr(lower_out, 'unknown_3', None),
             })
         return routing
 
