@@ -5,6 +5,58 @@ protocol facts live in `CLAUDE.md`; this file is for what is *not* done yet.
 
 ## In progress — picking up here
 
+### Block parsing: plan as of 2026-08-23
+
+Layout is **confirmed** against the device (see CLAUDE.md). What follows is
+ordered by dependency. "Device" marks anything needing hands on the LT.
+
+**A. Routing — splits and merges.** The biggest gap and now the most
+tractable. Splits/merges are not slots; they live in the four chain-endpoint
+segments (slot indices 0/9/10/19 and 20/29/30/39).
+
+Working hypothesis, from diffing preset 24 (Y split + A/B split + two merges)
+against presets 36 and 48 (serial):
+
+- `0d <n>` in an **in-lower** endpoint = the position where the lower branch
+  begins. Path 1 reads `0d 05` (split after block 4); Path 2 reads `0d 03`.
+  Serial presets read `0d 00`.
+- `0d <n>` in an **out-lower** endpoint = the position where it merges back.
+  Path 2 reads `0d 05`, matching the merge before `Plate`.
+- `0xca` + 4 bytes are IEEE-754 floats — mixer level/pan, which is what a
+  merge block holds. `utils/ieee754_convert.py` already decodes these.
+
+  A1. (no device) Implement the reader, assert preset 24's topology matches
+      what the operator described, and assert serial presets report no split.
+  A2. (device) Falsify it properly: take one preset and capture it with the
+      split at two different positions. If `0d <n>` tracks, it is confirmed;
+      if not, the number is something else that merely correlates on one
+      preset. **Do not skip this** — the hypothesis currently rests on two
+      presets agreeing.
+  A3. (device) Capture a preset with no lower row in use at all, to see what
+      an unused path looks like versus a serial one.
+
+**B. Seven unknown module ids.** `cd02c4 cd0291 cd02c9 cd02bb cd02cd cd027c
+cd02b8` — each appears once, 144 of 151 instances already resolve. They are
+almost certainly amps/cabs newer than upstream's Stomp-era catalogue.
+(device) Read the block name off the screen for each; add to `modules.py`.
+
+**C. Bypass toggle.** Largely settled already — the operator's reading of
+preset 24 confirmed the `0x0a` inversion across seven blocks. To close it:
+(device) capture one preset, toggle one block's bypass, capture again, and
+check only that slot's flag moves.
+
+**D. UI: four rows of eight.** `helix_qt_ui.py` still draws the HX Stomp's
+single strip (`HX_STOMP_BLOCK_COUNT = 10`, `HX_STOMP_EFFECT_SLOT_INDICES`).
+Needs 4x8 with bypass shading and, once A lands, split/merge indication.
+No device needed, but do it after A so routing is not bolted on afterwards.
+
+**E. Snapshot parameter values.** Each snapshot block is ~628 bytes of
+per-block state, unparsed. Deferred: large, and worth having A and D first so
+there is somewhere to show the result.
+
+Suggested order: A1 (no device) → A2, B, C in one device session → D → E.
+
+
 Preset-data capture, round 2. The device operator needs to identify presets by
 characteristic, because block count cannot be read out of a capture without
 the parser. **Ask for these, on the device's setlist 3 (wire index 2)**, where
