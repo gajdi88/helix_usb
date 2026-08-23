@@ -619,6 +619,13 @@ class HxPreset:
         # then stopped reporting a split, because its lower row is fed from
         # outside rather than by splitting its own input.
         4: 'Path 2A + Path 2B',
+        # Physical outputs, from the operator reading three presets off the
+        # device and naming each one's Path 2 output. All three agreed with
+        # the captured values, and disagreed under the alternative reading of
+        # which preset each capture came from -- which is what established
+        # that MIDI PC selects by display position, not storage index.
+        6: 'XLR',
+        12: 'USB 5/6',
     }
     SNAPSHOT_NAME_PREFIX = 0x04
 

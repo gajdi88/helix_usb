@@ -219,6 +219,32 @@ footswitch number — don't read it as one.
 These markers are nibble-indexed string searches, so matches are checked for
 byte alignment; an odd-offset match would shift every field after it.
 
+### Preset index: storage vs display — IMPORTANT
+
+The name enumeration returns names against a **storage index**. That is *not*
+the slot the device displays. If a preset has ever been moved, the two diverge:
+on this device the enumeration reports `TwoPrinces` at index 25 while the front
+panel shows `A30 Fawn Brt` at 7B, because the operator moved TwoPrinces to the
+end at some point.
+
+**MIDI Program Change selects by display position**, not storage index.
+Established 2026-08-23: the operator named the Path 2 output of three presets
+by their display slot, and every preset-data capture's exit value matched the
+display reading (22A DistortedSoloAir → USB 5/6 = 12, 31A GilmRhytLead →
+XLR = 6, 32B TwoPrinces → USB 5/6 = 12). The storage reading contradicted it —
+PC 120 would have been `ParaLitFishDrvT`, whose output is Multi = 1, against a
+captured 6.
+
+Consequences:
+
+- `bank = index // 4 + 1`, `letter = index % 4` converts a *storage* index to a
+  label, which is only the displayed slot when nothing has been moved. Do not
+  present it to the user as the device's slot without saying so.
+- The `preset_name` on `tests/fixtures/presets/sl2_preset*.jsonl` came from the
+  storage index and is **unreliable**; the fixtures are flagged
+  `preset_name_reliable: false`. The captured bytes are unaffected.
+- There is no known way yet to read the display order over the wire.
+
 ### Block layout — confirmed against the device 2026-08-23
 
 The operator read preset 24 ("ACDC", shown as **7A**) off the LT screen block
@@ -278,7 +304,8 @@ never fitted a merge story.
 | 1 | Multi output |
 | 2 | Path 2A |
 | 4 | Path 2A **and** Path 2B |
-| 6, 12 | observed, unexplained |
+| 6 | XLR |
+| 12 | USB 5/6 |
 
 1 and 2 are confirmed twice over, in opposite arrangements: preset 24 has Path
 1 upper → "output to multi" and lower → "output to path A", while the A2

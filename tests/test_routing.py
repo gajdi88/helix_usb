@@ -279,8 +279,28 @@ class ExitDestinationTest(unittest.TestCase):
         self.assertGreater(names.count('Multi output'), len(names) * 0.8)
 
     def test_unknown_values_are_reported_not_hidden(self):
-        self.assertEqual('unknown (12)', HxPreset.exit_destination_name(12))
+        self.assertEqual('unknown (99)', HxPreset.exit_destination_name(99))
         self.assertIsNone(HxPreset.exit_destination_name(None))
+
+    def test_physical_output_destinations(self):
+        """6 and 12 named from the operator reading three presets.
+
+        Each capture's exit value matched the output the operator named for
+        that preset, and only under the display-position reading of which
+        preset the capture came from -- see PresetSelectionMappingTest.
+        """
+        self.assertEqual('XLR', HxPreset.exit_destination_name(6))
+        self.assertEqual('USB 5/6', HxPreset.exit_destination_name(12))
+
+    def test_captures_carry_the_named_outputs(self):
+        cases = [('sl2_preset120.jsonl', 2, 'upper_exit', 6),
+                 ('sl2_preset084.jsonl', 2, 'lower_exit', 12),
+                 ('sl2_preset125.jsonl', 2, 'lower_exit', 12)]
+        for fixture, path_no, field, expected in cases:
+            if fixture not in self.caps:
+                continue
+            with self.subTest(fixture=fixture):
+                self.assertEqual(expected, self._p(fixture, path_no)[field])
 
     def test_a_merged_lower_chain_never_also_has_an_exit(self):
         """0 means merged, so it should not co-occur with a merge position
@@ -343,3 +363,42 @@ class FanOutTest(unittest.TestCase):
         occupied = [i for i in idxs
                     if preset.slot_info[i] and any(preset.slot_info[i].id_to_names())]
         self.assertTrue(occupied, 'the point of the test is a fed row with no split')
+
+
+class PresetSelectionMappingTest(unittest.TestCase):
+    """MIDI Program Change selects by display position, not storage index.
+
+    The preset-name enumeration returns names against a *storage* index. The
+    operator had moved a preset, so the device's display order no longer
+    matches that index: the enumeration reports TwoPrinces at index 25 while
+    the device shows A30 Fawn Brt at 7B.
+
+    All 15 preset-data captures were selected with MIDI Program Change, so
+    which preset each one actually holds depended on this. It was settled by
+    the operator naming the Path 2 output of three presets by their *display*
+    slot; every capture's exit value matched the display reading and PC 120
+    contradicted the storage reading outright.
+
+    Consequence: `preset_name` on those fixtures came from the storage index
+    and is unreliable. The captured bytes are unaffected.
+    """
+
+    def test_preset_fixtures_declare_how_they_were_selected(self):
+        import glob
+        import json
+        for path in glob.glob('tests/fixtures/presets/sl2_preset*.jsonl'):
+            with open(path, encoding='utf-8') as fh:
+                meta = json.loads(fh.readline())
+            with self.subTest(fixture=os.path.basename(path)):
+                self.assertIn('Program Change', meta.get('selected_by', ''))
+                self.assertFalse(meta.get('preset_name_reliable', True),
+                                 'storage-index name must not be presented as reliable')
+
+    def test_storage_index_and_display_slot_disagree(self):
+        """Guards the finding itself: if they ever agree again, revisit this."""
+        import json
+        names = json.loads(
+            open('tests/fixtures/lt_setlist2.jsonl').readline())['expect']['names_by_index']
+        # Operator, at the device: 7B is A30 Fawn Brt. Enumeration says index 25.
+        self.assertEqual('TwoPrinces', names['25'])
+        self.assertEqual('A30 Fawn Brt', names['26'])
