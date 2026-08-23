@@ -92,11 +92,23 @@ Fixing the matcher fixed the plural mode by side effect.
 
 Open work and ideas not yet started are tracked in `BACKLOG.md`.
 
-`utils/preset_parser.py::extract_footswitch_sections` does
-`data.index('0895')` and raises `ValueError` on LT presets — `0895` is an HX
-Stomp marker. This kills `modes/request_preset` in a worker thread on every
-run. It does not affect preset names. Confirmed still failing on the
-2026-08-22 hardware run: three tracebacks per startup.
+**Fixed 2026-08-23.** `extract_footswitch_sections` used to raise `ValueError`
+on every LT preset and kill `modes/request_preset` in a worker thread — three
+tracebacks per startup. All 15 preset captures now parse, and a live run logs
+real blocks (`Volume Pedal`, `Scream 808`, `WhoWatt 100`) with zero tracebacks.
+
+Still broken in preset data:
+
+- **Snapshot detection is dead.** `modes/request_preset.py` looks for
+  `860600070208`, absent from all 15 LT captures. It also only tests for
+  snapshots 1–3; the LT has 8.
+- **`FootSwitchInfo` yields empty objects.** Section extraction is correct and
+  the labels are in the bytes (`Kinky Boost`, `6 Switch Looper`), but the
+  field parser populates no attributes, so nothing surfaces. Next layer down.
+- **Some LT module ids are missing from `modules.py`** — e.g. `cd02bb`,
+  `cd02cd` print as `NOT FOUND IN MODULES`.
+- **`HxPreset.to_string()` uses HX Stomp bank arithmetic** —
+  `bank = preset_no / 3` with three presets per bank. The LT has four.
 
 ### Preset-data layout (derived 2026-08-22 from the captures)
 
@@ -130,13 +142,31 @@ so 16 assignable slots per group, **32 across the two DSP paths**. Upstream's
   string is safe here — but it is a nibble-level split and would corrupt the
   layout if that ever stopped holding. There is a test for it.
 
-**Markers that do not exist on the LT**, both inherited from the Stomp and both
-confirmed absent from all 15 captures:
+**Section markers differ from the Stomp.** Each pair must be used together —
+`049a` also occurs inside some LT presets, so mixing the two devices' markers
+truncates the section and the partial record then fails to parse:
 
-- `0895` — `utils/preset_parser.py::extract_footswitch_sections` does
-  `data.index('0895')`, hence the `ValueError` on every startup.
-- `860600070208` — `modes/request_preset.py` uses it to detect the active
-  snapshot, so snapshot reporting is silently dead too.
+| Boundary | HX Stomp | Helix LT |
+|---|---|---|
+| slot section → footswitch section | `0895` | `089d` |
+| end of footswitch section | `049a` | `04dc` |
+
+`0895` appears **zero** times in all 15 LT captures; `089d` exactly once in
+every one, including an empty preset, always followed by `04dc`.
+`860600070208` (the Stomp snapshot marker) is absent too.
+
+Footswitch records inside that section start `0x9N 0x87` and carry their label
+in the same `0xA1 + len` string encoding used by preset names:
+
+```
+9N 87 0a 00 0b 85 00 01 05 <0xA1+len> <ASCII label>
+```
+
+The low nibble of `0x9N` is 1 or 2 in the captures and is **not** the
+footswitch number — don't read it as one.
+
+These markers are nibble-indexed string searches, so matches are checked for
+byte alignment; an odd-offset match would shift every field after it.
 
 This is the **big remaining job**: block/slot and footswitch parsing. The LT
 has two DSP paths with ~16 block positions plus splits/merges and a 1→2

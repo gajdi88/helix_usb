@@ -7,6 +7,8 @@ in `data_in()` and the truncation logic in `set_preset_names()` are all the
 production code paths. A test that passes here is a statement about the
 shipping parser, not about a mock of it.
 """
+import contextlib
+import io
 import logging
 import os
 import sys
@@ -185,7 +187,10 @@ def replay_preset_data(capture_path):
 	parse_error = None
 
 	try:
-		with mock.patch.object(threading, 'Timer', _NoopTimer):
+		# HxPreset.to_string() prints the whole preset to stdout; a replay of
+		# every fixture would bury the test output.
+		with mock.patch.object(threading, 'Timer', _NoopTimer), \
+				contextlib.redirect_stdout(io.StringIO()):
 			mode.start()
 			for packet in packets:
 				if packet.get('ep', '0x81') != '0x81':

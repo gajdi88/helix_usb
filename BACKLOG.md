@@ -32,7 +32,18 @@ preset instead and sidestep it.
 
 ## Next up
 
-### Block/slot and footswitch parsing — the big one
+### Preset parsing — what is left after the 2026-08-23 fix
+Section extraction works and all 15 captures parse. Remaining, in order:
+
+- **`FootSwitchInfo` populates nothing.** The sections and their labels are
+  extracted correctly; the field parser inside produces empty objects.
+- **Snapshot detection is dead** — Stomp marker `860600070208` is absent from
+  LT data, and the code only handles snapshots 1–3 against the LT's 8.
+- **Missing module ids** in `modules.py` (`cd02bb`, `cd02cd`, …).
+- **`to_string()` bank arithmetic** assumes 3 presets per bank; the LT has 4.
+- **Splits/merges and the 1→2 routing block** are still entirely unmodelled.
+
+### Original notes on the big job
 `utils/preset_parser.py::extract_footswitch_sections` does `data.index('0895')`
 and raises `ValueError` on LT presets (`0895` is an HX Stomp marker). This
 kills `modes/request_preset` in a worker thread on **every** startup — three

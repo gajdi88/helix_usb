@@ -14,6 +14,7 @@ import os
 import unittest
 
 from tests.replay import preset_fixture_paths, replay_preset_data
+from utils.preset_parser import HxPreset
 
 SEGMENT_MARKER = '8213'
 EMPTY_SLOT_HEAD = '0814c0'
@@ -21,6 +22,8 @@ GROUP_MARKERS = {0: '00', 9: '01', 10: '02', 19: '03'}
 ASSIGNABLE = [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18]
 STOMP_FOOTSWITCH_MARKER = '0895'
 STOMP_SNAPSHOT_MARKER = '860600070208'
+LT_SECTION_BREAK = '089d'
+LT_SECTION_END = '04dc'
 
 
 def groups_of(hex_str):
@@ -113,16 +116,79 @@ class StompMarkersAbsentTest(unittest.TestCase):
             with self.subTest(fixture=name):
                 self.assertNotIn(STOMP_SNAPSHOT_MARKER, r.hex_str)
 
-    def test_parsing_currently_fails(self):
-        """Characterisation test: records today's breakage, not desired behaviour.
-
-        When the footswitch parser is taught the LT layout this will start
-        failing. That is the point -- update it then; do not delete it now.
-        """
+    def test_every_capture_parses_without_error(self):
+        """Was a characterisation test pinning the ValueError; now the fix."""
         for name, r in self.caps.items():
             with self.subTest(fixture=name):
-                self.assertIsInstance(r.parse_error, ValueError)
-                self.assertIn('substring not found', str(r.parse_error))
+                self.assertIsNone(r.parse_error)
+                self.assertIsNotNone(r.hx_preset)
+
+
+class LtSectionMarkersTest(unittest.TestCase):
+    """The LT's own markers, in place of the Stomp's."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.caps = {os.path.basename(p): replay_preset_data(p) for p in preset_fixture_paths()}
+        if not cls.caps:
+            raise unittest.SkipTest('no preset-data fixtures')
+
+    def _aligned_count(self, hex_str, marker):
+        return sum(1 for i in range(0, len(hex_str) - len(marker) + 1, 2)
+                   if hex_str[i:i + len(marker)] == marker)
+
+    def test_section_break_marker_present_exactly_once(self):
+        for name, r in self.caps.items():
+            with self.subTest(fixture=name):
+                self.assertEqual(1, self._aligned_count(r.hex_str, LT_SECTION_BREAK))
+
+    def test_section_end_marker_follows_the_break(self):
+        for name, r in self.caps.items():
+            with self.subTest(fixture=name):
+                tail = r.hex_str[r.hex_str.index(LT_SECTION_BREAK):]
+                self.assertIn(LT_SECTION_END, tail)
+
+    def test_forty_slot_sections_extracted(self):
+        # Two groups of twenty: the whole point of the layout finding.
+        for name, r in self.caps.items():
+            with self.subTest(fixture=name):
+                self.assertEqual(40, len(HxPreset.extract_slot_sections(r.hex_str)))
+
+    def test_footswitch_sections_are_bounded(self):
+        # Without a terminator the scan manufactures a section per 0xc0 byte
+        # in the trailing padding; that produced 545 sections before the fix.
+        for name, r in self.caps.items():
+            with self.subTest(fixture=name):
+                n = len(HxPreset.extract_footswitch_sections(r.hex_str))
+                self.assertGreater(n, 0)
+                self.assertLess(n, 32)
+
+    def test_footswitch_labels_are_recoverable(self):
+        r = self.caps['sl2_preset120.jsonl']
+        blob = b''.join(HxPreset.extract_footswitch_sections(r.hex_str))
+        for label in (b'Kinky Boost', b'GrammaticoLG Brt', b'6 Switch Looper'):
+            self.assertIn(label, blob)
+
+    def test_empty_preset_has_no_footswitch_labels(self):
+        r = self.caps['sl3_preset127_empty.jsonl']
+        blob = b''.join(HxPreset.extract_footswitch_sections(r.hex_str))
+        self.assertFalse([b for b in blob if 32 <= b <= 126],
+                         'empty preset should carry no printable footswitch labels')
+
+    def test_known_blocks_are_named(self):
+        """End to end: bytes off the wire to named modules."""
+        r = self.caps['sl2_preset120.jsonl']
+        names = []
+        for slot in r.hx_preset.slot_info[:20]:
+            if slot is None:
+                continue
+            info = slot.id_to_names()
+            for entry in info:
+                if entry:
+                    names.append(entry[1])
+        joined = ' '.join(names)
+        self.assertIn('Kinky Boost', joined)
+        self.assertIn('Deluxe Comp', joined)
 
 
 if __name__ == '__main__':

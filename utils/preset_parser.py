@@ -1,6 +1,8 @@
 from utils.formatter import ieee754_to_rendered_str
+import logging
 import sys
 from modules import modules
+log = logging.getLogger(__name__)
 
 
 class SlotInfo:
@@ -523,27 +525,88 @@ class HxPreset:
         # switch infos
         fs_info_data = self.extract_footswitch_sections(self.data_in)
 
-        for data in fs_info_data:
-            switch_info = FootSwitchInfo(data, debug=False)
+        for idx, data in enumerate(fs_info_data):
+            try:
+                switch_info = FootSwitchInfo(data, debug=False)
+            except Exception as e:      # noqa: BLE001
+                log.warning('Footswitch section %d did not parse (%s); skipping it', idx, e)
+                switch_info = None
             self.switch_info.append(switch_info)
             # print(switch_info)
 
         # slot infos
         slot_data = self.extract_slot_sections(self.data_in)
 
-        for data in slot_data:
-            slot_info = SlotInfo(data, debug=False)
+        # Sections are kept positionally aligned, so a section that fails
+        # becomes None rather than shifting every slot after it. Some sections
+        # are structural markers rather than slots (the 00/01/02/03 entries at
+        # indices 0, 9, 10 and 19 of each group) and are not expected to parse
+        # as slots at all -- one of them must not take the whole preset down.
+        for idx, data in enumerate(slot_data):
+            try:
+                slot_info = SlotInfo(data, debug=False)
+            except Exception as e:      # noqa: BLE001
+                log.warning('Slot section %d did not parse (%s); leaving it empty', idx, e)
+                self.slot_info.append(None)
+                continue
             self.slot_info.append(slot_info)
             # print(slot_info.parameter_a)
             # print(slot_info.parameter_b)
 
+    # (section break, footswitch section end) per device family. The break
+    # separates the slot section from the footswitch section.
+    #
+    # Confirmed across 15 Helix LT captures: 0895 appears zero times in all of
+    # them, 089d exactly once in every one including an empty preset, and 04dc
+    # always directly after it.
+    #
+    # The pair is kept together deliberately. 049a also turns up inside some LT
+    # presets, so mixing the two devices' markers truncates the section early
+    # and the partial record then fails to parse. Matching the break decides
+    # the terminator.
+    SECTION_LAYOUTS = (
+        ('0895', '049a'),   # HX Stomp
+        ('089d', '04dc'),   # Helix LT
+    )
+
+    @staticmethod
+    def _find_aligned(data, marker, start=0):
+        """Index of `marker` in a hex string, on a byte boundary only.
+
+        These are nibble-indexed strings, so a match at an odd offset would
+        silently shift every field that follows by half a byte.
+        """
+        idx = data.find(marker, start)
+        while idx != -1 and idx % 2:
+            idx = data.find(marker, idx + 1)
+        return idx
+
+    @staticmethod
+    def _find_section_break(data):
+        """Return (index, break_marker, end_marker) for whichever layout matches."""
+        for break_marker, end_marker in HxPreset.SECTION_LAYOUTS:
+            idx = HxPreset._find_aligned(data, break_marker)
+            if idx != -1:
+                return idx, break_marker, end_marker
+        return -1, None, None
+
     @staticmethod
     def extract_footswitch_sections(data):
-        begin = data.index('0895')
-        assert (begin >= 0)
-        data = data[begin + 4:]
-        end = data.index('049a')
-        assert (end >= 0)
+        begin, marker, end_marker = HxPreset._find_section_break(data)
+        if begin == -1:
+            log.warning('No footswitch section marker (%s) found in preset data; '
+                        'skipping footswitch parse',
+                        ' or '.join(b for b, _e in HxPreset.SECTION_LAYOUTS))
+            return []
+        data = data[begin + len(marker):]
+        end = HxPreset._find_aligned(data, end_marker)
+        if end == -1:
+            # Without a terminator the scan runs into the trailing padding and
+            # manufactures a section per 0xc0 byte, so refuse rather than
+            # return hundreds of bogus footswitches.
+            log.warning('No footswitch section terminator (%s) found in preset data; '
+                        'skipping footswitch parse', end_marker)
+            return []
         data = data[:end]
         data = bytes.fromhex(data)
         # look for 9187, 9287, 9387 and so on
@@ -553,7 +616,8 @@ class HxPreset:
         end = -1
 
         # divide into 5 switch information
-        for peek_cursor in range(0, len(data)):
+        # len - 1: the 0x9N test peeks at the next byte.
+        for peek_cursor in range(0, len(data) - 1):
             # print("{:x} {:x}".format(data[peek_cursor], data[peek_cursor+1]))
             if (data[peek_cursor] & 0xF0) == 0x90 and data[peek_cursor + 1] == 0x87:
                 # begin of a new footswitch info section
@@ -581,11 +645,19 @@ class HxPreset:
 
     @staticmethod
     def extract_slot_sections(data):
-        begin = data.index('8215')
-        assert (begin >= 0)
+        begin = HxPreset._find_aligned(data, '8215')
+        if begin == -1:
+            log.warning('No slot section marker (8215) found in preset data; '
+                        'skipping slot parse')
+            return []
         data = data[begin + 14:]
-        end = data.index('0895')
-        assert (end >= 0)
+        # Terminated by the same slot/footswitch section break that differs
+        # between the Stomp (0895) and the LT (089d).
+        end, _marker, _end_marker = HxPreset._find_section_break(data)
+        if end == -1:
+            log.warning('No slot section terminator found in preset data; '
+                        'skipping slot parse')
+            return []
         data = data[:end]
         data = bytes.fromhex(data)
         # look for 9187, 9287, 9387 and so on
@@ -595,7 +667,8 @@ class HxPreset:
         end = -1
 
         # divide into 5 switch information
-        for peek_cursor in range(0, len(data)):
+        # len - 1: the 0x8N test peeks at the next byte.
+        for peek_cursor in range(0, len(data) - 1):
             # print("{:x} {:x}".format(data[peek_cursor], data[peek_cursor+1]))
             if (data[peek_cursor] & 0xF0) == 0x80 and data[peek_cursor + 1] == 0x13:
                 # begin of a new footswitch info section
@@ -626,7 +699,11 @@ class HxPreset:
 
         print("Slots: ")
         for slot_idx in slots_idx:
-            module_name_info = self.slot_info[slot_idx].id_to_names()
+            slot = self.slot_info[slot_idx] if slot_idx < len(self.slot_info) else None
+            if slot is None:
+                print('[{}]: -'.format(slot_idx))
+                continue
+            module_name_info = slot.id_to_names()
             beauty_str = ''
             if module_name_info[0] == '' and module_name_info[1] == '':
                 beauty_str += '[{}]: -'.format(slot_idx)
