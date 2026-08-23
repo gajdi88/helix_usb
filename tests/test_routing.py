@@ -62,19 +62,45 @@ class RoutingTest(unittest.TestCase):
                     self.assertIsNone(entry['merge_position'])
                     self.assertFalse(entry['merges_at_output'])
 
-    def test_a_split_always_has_somewhere_to_rejoin(self):
-        """The invariant that makes the model credible.
+    def test_a_split_always_has_a_described_destination(self):
+        """Weakened by evidence, deliberately.
 
-        A split branch must rejoin, either at a numbered position or at the
-        path output. If a fixture ever reports a split with neither, the
-        reading of one of the two fields is wrong.
+        This began as "a split branch must rejoin, at a numbered position or
+        at the path output". The A2 baseline disproved it: the operator built
+        a Path 1 that splits and never merges, because the lower branch exits
+        to the output on its own while the upper branch feeds Path 2. That
+        path reports merge_flag 1 with no merge position.
+
+        So the real invariant is weaker: a split always has its destination
+        described somehow, by a merge position or by a non-zero flag.
         """
         for name, preset in self.caps.items():
             for entry in preset.routing:
                 if not entry['split_position']:
                     continue
                 with self.subTest(fixture=name, path=entry['path']):
-                    self.assertTrue(entry['merge_position'] or entry['merges_at_output'])
+                    self.assertTrue(entry['merge_position']
+                                    or entry['merges_at_output']
+                                    or entry['merge_flag'],
+                                    'split with no destination described')
+
+    def test_a2_baseline_matches_the_operator_build(self):
+        """Predicted before the capture was parsed, then confirmed.
+
+        The operator built this preset deliberately: one block at position 5
+        on each of the four rows, a split just before block 5 on both paths,
+        a merge just after block 5 on Path 2 only. Predicted split 5/5 and
+        merge None/6; got exactly that.
+        """
+        fixture = 'a2_routing_baseline.jsonl'
+        if fixture not in self.caps:
+            self.skipTest('A2 baseline not present')
+        p1 = self._path(fixture, 1)
+        p2 = self._path(fixture, 2)
+        self.assertEqual(5, p1['split_position'])
+        self.assertIsNone(p1['merge_position'])
+        self.assertEqual(5, p2['split_position'])
+        self.assertEqual(6, p2['merge_position'])
 
     def test_split_positions_are_within_the_row(self):
         for name, preset in self.caps.items():
