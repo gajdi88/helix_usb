@@ -105,22 +105,28 @@ class BlockGridTest(unittest.TestCase):
         self.assertFalse(self.window._block_buttons[(0, 1)].isChecked())
 
     def test_unknown_modules_are_shown_not_swallowed(self):
-        """A slot whose module id is missing from modules.py is still occupied.
+        """A slot whose module id is missing from modules.py stays visible.
 
         id_to_names() reports an unknown id as ["NOT FOUND IN MODULES <id>",
         ""] -- message in the category slot, no name. Rendered naively that
-        made an occupied slot look empty, hiding five real blocks across the
-        fixtures.
+        made an occupied slot look empty. Uses a fabricated id, so the test
+        keeps working now that every captured id resolves.
         """
-        other = 'tests/fixtures/presets/sl2_preset125.jsonl'
-        if not os.path.exists(other):
-            self.skipTest('fixture missing')
-        layout = replay_preset_data(other).hx_preset.to_layout()
+        layout = {
+            'rows': [{'name': name,
+                      'blocks': [{'position': p, 'name': None, 'category': None,
+                                  'bypassed': False, 'dual': False}
+                                 for p in range(1, 9)]}
+                     for name in self.ui.BLOCK_ROW_NAMES],
+            'routing': [], 'snapshot_names': [],
+        }
+        layout['rows'][0]['blocks'][2].update(
+            {'name': '?cdffff', 'category': 'Unknown', 'unknown_id': 'cdffff'})
         self.window.bridge.helix.set_preset_layout(layout)
-        btn = self.window._block_buttons[(0, 5)]
+        btn = self.window._block_buttons[(0, 3)]
         self.assertNotEqual('-', btn.text())
-        self.assertIn('cd02b8', btn.text())
-        self.assertIn('cd02b8', btn.toolTip())
+        self.assertIn('cdffff', btn.text())
+        self.assertIn('cdffff', btn.toolTip())
 
     def test_selection_sends_nothing(self):
         """The old strip called highlight_slot(), which writes to the device."""

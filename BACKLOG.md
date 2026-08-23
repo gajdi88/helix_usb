@@ -35,10 +35,14 @@ against presets 36 and 48 (serial):
   A3. (device) Capture a preset with no lower row in use at all, to see what
       an unused path looks like versus a serial one.
 
-**B. Seven unknown module ids.** `cd02c4 cd0291 cd02c9 cd02bb cd02cd cd027c
-cd02b8` — each appears once, 144 of 151 instances already resolve. They are
-almost certainly amps/cabs newer than upstream's Stomp-era catalogue.
-(device) Read the block name off the screen for each; add to `modules.py`.
+**B. Seven unknown module ids.** DONE 2026-08-23. All read off the device and
+added to `modules.py`: three Dynamic reverbs, three cabs and an IR block.
+Every block in every capture now resolves, and a test fails if a future
+capture introduces a new unknown id.
+
+Only loose end: `cd02c4` was reported as "an IR block", so its category is
+certain but its exact block name is not; it is entered generically as
+`Impulse Response`.
 
 **C. Bypass toggle.** Largely settled already — the operator's reading of
 preset 24 confirmed the `0x0a` inversion across seven blocks. To close it:

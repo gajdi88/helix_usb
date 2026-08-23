@@ -190,14 +190,25 @@ class LayoutViewTest(unittest.TestCase):
         self.assertTrue(rows['Path 1 upper'][5]['bypassed'])       # Tile
         self.assertFalse(rows['Path 2 upper'][7]['bypassed'])      # Glitz
 
-    def test_unknown_module_ids_are_surfaced(self):
-        import glob
-        found = []
-        for path in glob.glob('tests/fixtures/presets/sl2_preset*.jsonl'):
-            for row in replay_preset_data(path).hx_preset.to_layout()['rows']:
-                found += [b['unknown_id'] for b in row['blocks'] if b.get('unknown_id')]
-        # Five occupied slots carry ids missing from modules.py; none of them
-        # may be reported as an empty slot.
-        self.assertTrue(found)
-        for uid in found:
-            self.assertTrue(uid.startswith('cd'))
+    def test_an_unknown_module_id_is_surfaced_not_swallowed(self):
+        """An id missing from modules.py must still read as an occupied slot.
+
+        Tested with a fabricated id rather than by relying on the fixtures
+        containing one -- they no longer do, now that all seven have been read
+        off the device, and a test that silently stops exercising anything is
+        worse than no test.
+        """
+        preset = replay_preset_data(FIXTURE).hx_preset
+        slot = next(s for s in preset.slot_info
+                    if s is not None and any(s.id_to_names()))
+        original = slot.amp_effect_slot_a
+        slot.amp_effect_slot_a = bytes.fromhex('cdffff')
+        try:
+            layout = preset.to_layout()
+        finally:
+            slot.amp_effect_slot_a = original
+        found = [b for row in layout['rows'] for b in row['blocks']
+                 if b.get('unknown_id') == 'cdffff']
+        self.assertEqual(1, len(found))
+        self.assertEqual('?cdffff', found[0]['name'])
+        self.assertEqual('Unknown', found[0]['category'])

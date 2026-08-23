@@ -1,4 +1,16 @@
 modules = {
+	# --- Helix LT blocks absent from the HX Stomp-era catalogue -------------
+	# Read off the device by the operator on 2026-08-23, one slot at a time,
+	# each anchored against a known neighbouring block to confirm the preset.
+	'cd0291':	['Reverb', 'Dynamic Room (stereo)'],
+	'cd027c':	['Reverb', 'Dynamic Plate (stereo)'],
+	'cd02c9':	['Reverb', 'Dynamic Ambience'],
+	'cd02bb':	['Cab', '1x12 Grammatico'],
+	'cd02cd':	['Cab', '1x10 US Princess'],
+	'cd02b8':	['Cab', '4x12 Uber T75'],
+	# Reported only as "an IR block", so the category is certain but the exact
+	# block name is not. Named generically rather than invented.
+	'cd02c4':	['Impulse Response', 'Impulse Response'],
 	'cd0184':	['Distortion', 'Kinky Boost (mono)'],
 	'cd0185':	['Distortion', 'Kinky Boost (stereo)'],
 	'cd01fe':	['Distortion', 'Deranged Master (mono)'],
