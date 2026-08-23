@@ -45,10 +45,15 @@ preset 24 confirmed the `0x0a` inversion across seven blocks. To close it:
 (device) capture one preset, toggle one block's bypass, capture again, and
 check only that slot's flag moves.
 
-**D. UI: four rows of eight.** `helix_qt_ui.py` still draws the HX Stomp's
-single strip (`HX_STOMP_BLOCK_COUNT = 10`, `HX_STOMP_EFFECT_SLOT_INDICES`).
-Needs 4x8 with bypass shading and, once A lands, split/merge indication.
-No device needed, but do it after A so routing is not bolted on afterwards.
+**D. UI: four rows of eight.** DONE 2026-08-23. The grid is fed by
+`HxPreset.to_layout()` through `HelixUsb.set_preset_layout()`, with bypass
+shading, category colours, per-row routing summaries and click-to-inspect.
+The legacy HX Stomp strip and its `set_slot_info()` feed were never called and
+are now inert; `_set_selected_slot()` in particular called `highlight_slot()`,
+which writes to the device.
+
+Left over from it: the grid is display-only. Selecting or bypassing a block
+from the UI would write device state and has not been asked for.
 
 **E. Snapshot parameter values.** Each snapshot block is ~628 bytes of
 per-block state, unparsed. Deferred: large, and worth having A and D first so

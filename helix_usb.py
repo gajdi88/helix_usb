@@ -172,6 +172,10 @@ class HelixUsb:
 		self.snapshot_change_cb_fct_list = list()
 		self.snapshot_names = []
 		self.snapshot_names_change_cb_fct_list = list()
+		# Four rows of eight plus routing, as produced by HxPreset.to_layout().
+		# Separate from set_slot_info(), which is the HX Stomp's 16-slot shape.
+		self.preset_layout = None
+		self.preset_layout_change_cb_fct_list = list()
 
 		self.excel_logger = None
 		self.packet_recorder = None
@@ -226,6 +230,17 @@ class HelixUsb:
 		if self.serial_interface is not None:
 			self.open_fbv.stop()
 			self.serial_interface.close()
+
+	def register_preset_layout_change_cb_fct(self, p_cb_fct):
+		if p_cb_fct not in self.preset_layout_change_cb_fct_list:
+			self.preset_layout_change_cb_fct_list.append(p_cb_fct)
+
+	def set_preset_layout(self, layout):
+		if layout == self.preset_layout:
+			return
+		self.preset_layout = layout
+		for cb_fct in self.preset_layout_change_cb_fct_list:
+			cb_fct(self.preset_layout)
 
 	def register_snapshot_names_change_cb_fct(self, p_cb_fct):
 		if p_cb_fct not in self.snapshot_names_change_cb_fct_list:

@@ -163,3 +163,41 @@ class PresetReferenceTest(unittest.TestCase):
                 self.assertTrue(meta.get('preset_display'), 'no bank+letter reference')
                 self.assertTrue(meta.get('setlist_display'), 'no setlist')
                 self.assertTrue(meta.get('preset_name'), 'no preset name')
+
+
+class LayoutViewTest(unittest.TestCase):
+    """HxPreset.to_layout(): the plain-data view the UI consumes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.layout = replay_preset_data(FIXTURE).hx_preset.to_layout()
+
+    def test_shape(self):
+        self.assertEqual(4, len(self.layout['rows']))
+        for row in self.layout['rows']:
+            self.assertEqual(8, len(row['blocks']))
+            self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8],
+                             [b['position'] for b in row['blocks']])
+
+    def test_carries_routing_and_snapshots(self):
+        self.assertEqual(2, len(self.layout['routing']))
+        self.assertEqual(8, len(self.layout['snapshot_names']))
+
+    def test_matches_the_device_reading(self):
+        rows = {r['name']: r['blocks'] for r in self.layout['rows']}
+        self.assertIn('Red Squeeze', rows['Path 1 upper'][0]['name'])
+        self.assertIsNone(rows['Path 1 upper'][2]['name'])
+        self.assertTrue(rows['Path 1 upper'][5]['bypassed'])       # Tile
+        self.assertFalse(rows['Path 2 upper'][7]['bypassed'])      # Glitz
+
+    def test_unknown_module_ids_are_surfaced(self):
+        import glob
+        found = []
+        for path in glob.glob('tests/fixtures/presets/sl2_preset*.jsonl'):
+            for row in replay_preset_data(path).hx_preset.to_layout()['rows']:
+                found += [b['unknown_id'] for b in row['blocks'] if b.get('unknown_id')]
+        # Five occupied slots carry ids missing from modules.py; none of them
+        # may be reported as an empty slot.
+        self.assertTrue(found)
+        for uid in found:
+            self.assertTrue(uid.startswith('cd'))

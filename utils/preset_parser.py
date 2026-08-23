@@ -629,6 +629,46 @@ class HxPreset:
     }
     SNAPSHOT_NAME_PREFIX = 0x04
 
+    def to_layout(self):
+        """A UI-facing view of the preset: four rows of eight, plus routing.
+
+        Deliberately plain data. The UI should not have to know how SlotInfo
+        stores things, nor that "bypassed" is the field and "enabled" the
+        derived one.
+        """
+        rows = []
+        for row_name, idxs in SlotInfo.ROWS:
+            blocks = []
+            for position, slot_idx in enumerate(idxs, start=1):
+                slot = self.slot_info[slot_idx] if slot_idx < len(self.slot_info) else None
+                entry = {'position': position, 'name': None, 'category': None,
+                         'bypassed': False, 'dual': False}
+                if slot is not None:
+                    infos = [i for i in slot.id_to_names() if i]
+                    if infos:
+                        category, name = infos[0][0], infos[0][1]
+                        # An id missing from modules.py comes back as
+                        # ["NOT FOUND IN MODULES <id>", ""] -- the message in
+                        # the category slot and no name. Rendered naively that
+                        # makes an occupied slot look empty, which hides real
+                        # blocks; show the id instead.
+                        if not name and str(category).startswith('NOT FOUND'):
+                            entry['unknown_id'] = str(category).rsplit(' ', 1)[-1]
+                            entry['category'] = 'Unknown'
+                            entry['name'] = '?%s' % entry['unknown_id']
+                        else:
+                            entry['category'] = category
+                            entry['name'] = name.replace(' (mono)', '').replace(' (stereo)', '')
+                        entry['bypassed'] = bool(getattr(slot, 'bypassed', False))
+                        entry['dual'] = bool(getattr(slot, 'dual_slot', False))
+                blocks.append(entry)
+            rows.append({'name': row_name, 'blocks': blocks})
+        return {
+            'rows': rows,
+            'routing': list(self.routing),
+            'snapshot_names': list(self.snapshot_names),
+        }
+
     @staticmethod
     def preset_reference(preset_no):
         """Device-facing preset label: 24 -> '7A', 127 -> '32D'.

@@ -78,10 +78,10 @@ def normalize_preset_names(preset_names):
 	return names
 
 
-HX_STOMP_BLOCK_COUNT = 10
-HX_STOMP_INPUT_SLOT_INDEX = 0
-HX_STOMP_OUTPUT_SLOT_INDEX = 9
-HX_STOMP_EFFECT_SLOT_INDICES = [1, 2, 3, 4, 5, 6, 7, 8]
+# The Helix LT has two DSP paths, each with an upper and lower row of eight
+# block positions. The HX Stomp's single row of eight does not apply.
+BLOCK_ROW_NAMES = ('Path 1 upper', 'Path 1 lower', 'Path 2 upper', 'Path 2 lower')
+BLOCKS_PER_ROW = 8
 
 
 COLOR_HEX = {
@@ -188,6 +188,7 @@ class HelixBridge(QObject):
 	preset_no_changed = Signal(int)
 	slot_data_changed = Signal(int, object)
 	snapshot_changed = Signal(int)
+	preset_layout_changed = Signal(object)
 	snapshot_names_changed = Signal(list)
 	connection_changed = Signal(bool)
 	status = Signal(str)
@@ -204,6 +205,7 @@ class HelixBridge(QObject):
 		self.helix.register_preset_no_change_cb_fct(self._on_preset_no)
 		self.helix.register_slot_data_change_cb_fct(self._on_slot_data)
 		self.helix.register_snapshot_change_cb_fct(self._on_snapshot)
+		self.helix.register_preset_layout_change_cb_fct(self._on_preset_layout)
 		self.helix.register_snapshot_names_change_cb_fct(self._on_snapshot_names)
 
 		self.connection_poll = QTimer(self)
@@ -257,6 +259,9 @@ class HelixBridge(QObject):
 	def _on_preset_names(self, preset_names):
 		self.preset_names_changed.emit(list(preset_names))
 
+	def _on_preset_layout(self, layout):
+		self.preset_layout_changed.emit(layout)
+
 	def _on_snapshot(self, snapshot_no):
 		self.snapshot_changed.emit(int(snapshot_no))
 
@@ -291,10 +296,11 @@ class MainWindow(QMainWindow):
 		self.resize(1200, 760)
 
 		self.bridge = HelixBridge()
-		self._slot_index_map = {slot_idx: slot_idx for slot_idx in HX_STOMP_EFFECT_SLOT_INDICES}
+		self._slot_index_map = {}
 		self._slot_button_widgets = {}
 		self._slot_type_label_widgets = {}
 		self._slot_info_cache = {}
+		self._layout_rows = []
 		self._selected_slot_no = 1
 
 		self._build_ui()
@@ -375,68 +381,47 @@ class MainWindow(QMainWindow):
 		block_row_layout.setSpacing(12)
 		right_layout.addWidget(block_row_wrap, 0)
 
-		strip_panel = SignalChainPanel()
-		strip_panel.setObjectName("blockStripPanel")
-		strip_panel.setFixedHeight(120)
-		strip_layout = QHBoxLayout(strip_panel)
-		strip_layout.setContentsMargins(10, 10, 10, 10)
-		strip_layout.setSpacing(16)
+		# Four rows of eight: Path 1 upper/lower, Path 2 upper/lower. The HX
+		# Stomp's single strip of eight is not the LT's shape.
+		self._block_buttons = {}
+		self._row_routing_labels = {}
+		grid_panel = QFrame()
+		grid_panel.setObjectName("blockStripPanel")
+		grid_layout = QVBoxLayout(grid_panel)
+		grid_layout.setContentsMargins(10, 8, 10, 8)
+		grid_layout.setSpacing(4)
 
-		input_col = QWidget()
-		input_col_layout = QVBoxLayout(input_col)
-		input_col_layout.setContentsMargins(0, 0, 0, 0)
-		input_col_layout.setSpacing(2)
-		input_label = QLabel("○")
-		input_label.setObjectName("ioEndpoint")
-		input_label.setToolTip("Input")
-		input_label.setFixedSize(40, 56)
-		input_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-		input_spacer = QLabel(" ")
-		input_spacer.setObjectName("slotTypeLabel")
-		input_spacer.setFixedWidth(40)
-		input_col_layout.addWidget(input_label, 0, Qt.AlignmentFlag.AlignCenter)
-		input_col_layout.addWidget(input_spacer, 0, Qt.AlignmentFlag.AlignCenter)
-		strip_layout.addWidget(input_col)
+		for row_index, row_name in enumerate(BLOCK_ROW_NAMES):
+			row_widget = QWidget()
+			row_layout = QHBoxLayout(row_widget)
+			row_layout.setContentsMargins(0, 0, 0, 0)
+			row_layout.setSpacing(6)
 
-		for slot_no in HX_STOMP_EFFECT_SLOT_INDICES:
-			slot_widget = QWidget()
-			slot_layout = QVBoxLayout(slot_widget)
-			slot_layout.setContentsMargins(0, 0, 0, 0)
-			slot_layout.setSpacing(4)
+			caption = QLabel(row_name)
+			caption.setObjectName("rowCaption")
+			caption.setFixedWidth(92)
+			row_layout.addWidget(caption)
 
-			btn = QPushButton("◼")
-			btn.setObjectName("slotButton")
-			btn.setCheckable(True)
-			btn.setFixedSize(40, 56)
-			btn.clicked.connect(lambda checked, s=slot_no: self._set_selected_slot(s, source="ui"))
-			type_label = QLabel("---")
-			type_label.setObjectName("slotTypeLabel")
-			type_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-			type_label.setFixedWidth(40)
+			for position in range(1, BLOCKS_PER_ROW + 1):
+				btn = QPushButton("-")
+				btn.setObjectName("slotButton")
+				btn.setCheckable(True)
+				btn.setFixedSize(78, 34)
+				btn.clicked.connect(
+					lambda _checked, r=row_index, pos=position: self._on_block_clicked(r, pos))
+				row_layout.addWidget(btn)
+				self._block_buttons[(row_index, position)] = btn
 
-			slot_layout.addWidget(btn, 0, Qt.AlignmentFlag.AlignCenter)
-			slot_layout.addWidget(type_label, 0, Qt.AlignmentFlag.AlignCenter)
-			strip_layout.addWidget(slot_widget)
-			self._slot_button_widgets[slot_no] = btn
-			self._slot_type_label_widgets[slot_no] = type_label
+			routing_label = QLabel("")
+			routing_label.setObjectName("slotTypeLabel")
+			routing_label.setMinimumWidth(150)
+			row_layout.addWidget(routing_label)
+			self._row_routing_labels[row_index] = routing_label
 
-		output_col = QWidget()
-		output_col_layout = QVBoxLayout(output_col)
-		output_col_layout.setContentsMargins(0, 0, 0, 0)
-		output_col_layout.setSpacing(2)
-		output_label = QLabel("○")
-		output_label.setObjectName("ioEndpoint")
-		output_label.setToolTip("Output")
-		output_label.setFixedSize(40, 56)
-		output_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-		output_spacer = QLabel(" ")
-		output_spacer.setObjectName("slotTypeLabel")
-		output_spacer.setFixedWidth(40)
-		output_col_layout.addWidget(output_label, 0, Qt.AlignmentFlag.AlignCenter)
-		output_col_layout.addWidget(output_spacer, 0, Qt.AlignmentFlag.AlignCenter)
-		strip_layout.addWidget(output_col)
-		strip_panel.set_endpoints(input_label, output_label)
-		block_row_layout.addWidget(strip_panel, 1)
+			row_layout.addStretch()
+			grid_layout.addWidget(row_widget)
+
+		block_row_layout.addWidget(grid_panel, 1)
 
 		snapshot_row = QHBoxLayout()
 		snapshot_row.setSpacing(6)
@@ -532,6 +517,7 @@ class MainWindow(QMainWindow):
 
 		self.bridge.preset_names_changed.connect(self._on_preset_names_changed)
 		self.bridge.snapshot_changed.connect(self._on_snapshot_changed)
+		self.bridge.preset_layout_changed.connect(self._on_preset_layout_changed)
 		self.bridge.snapshot_names_changed.connect(self._on_snapshot_names_changed)
 		self.bridge.preset_no_changed.connect(self._on_preset_no_changed)
 		self.bridge.slot_data_changed.connect(self._on_slot_data_changed)
@@ -653,6 +639,70 @@ class MainWindow(QMainWindow):
 							"border-radius: 6px; padding: 4px 2px; color: #e8eaed; "
 							"font-weight: bold; }")
 
+	def _on_block_clicked(self, row_index, position):
+		"""Selection is display-only; nothing is sent to the device."""
+		for key, btn in self._block_buttons.items():
+			btn.setChecked(key == (row_index, position))
+		block = (self._layout_rows[row_index]['blocks'][position - 1]
+				 if row_index < len(self._layout_rows) else None)
+		if not block or not block['name']:
+			self.block_info_slot.setText('Slot: %s %d — empty' % (
+				BLOCK_ROW_NAMES[row_index], position))
+			return
+		self.block_info_slot.setText('Slot: %s %d — %s (%s)%s' % (
+			BLOCK_ROW_NAMES[row_index], position, block['name'],
+			block['category'] or '?', '  [bypassed]' if block['bypassed'] else ''))
+
+	def _routing_summary(self, row_index, routing):
+		"""One line per row describing how it is reached and where it goes."""
+		path_no = 1 if row_index < 2 else 2
+		entry = next((r for r in routing if r['path'] == path_no), None)
+		if entry is None:
+			return ''
+		if row_index in (0, 2):
+			return 'exit: %s' % (entry.get('upper_exit_name') or '?')
+		bits = []
+		if entry.get('split_position'):
+			bits.append('split @%d' % entry['split_position'])
+		if entry.get('merge_position'):
+			bits.append('merge @%s' % ('out' if entry['merge_position'] == 9
+									   else entry['merge_position']))
+		bits.append('exit: %s' % (entry.get('lower_exit_name') or '?'))
+		return '  '.join(bits)
+
+	def _on_preset_layout_changed(self, layout):
+		self._layout_rows = layout.get('rows', []) if layout else []
+		routing = layout.get('routing', []) if layout else []
+		for row_index, row in enumerate(self._layout_rows):
+			for block in row['blocks']:
+				btn = self._block_buttons.get((row_index, block['position']))
+				if btn is None:
+					continue
+				if not block['name']:
+					btn.setText('-')
+					btn.setToolTip('')
+					btn.setStyleSheet(
+						"#slotButton { background: #2d3239; border: 1px solid #3a3f46;"
+						" border-radius: 5px; color: #6b7178; }")
+					continue
+				short = block['name'].split(',')[0]
+				btn.setText(short[:12])
+				btn.setToolTip('%s (%s)%s' % (block['name'], block['category'] or '?',
+											  '  [bypassed]' if block['bypassed'] else ''))
+				colour = self._slot_color_for_category(block['category'])
+				if block['bypassed']:
+					# Bypassed blocks stay legible but visibly inactive.
+					btn.setStyleSheet(
+						"#slotButton { background: #2d3239; border: 1px dashed %s;"
+						" border-radius: 5px; color: #8b9198; font-style: italic; }" % colour)
+				else:
+					btn.setStyleSheet(
+						"#slotButton { background: %s; border: 1px solid #3a3f46;"
+						" border-radius: 5px; color: #10131a; }" % colour)
+		for row_index, label in self._row_routing_labels.items():
+			label.setText(self._routing_summary(row_index, routing))
+		self._append_status('Preset layout updated')
+
 	def _refresh_snapshot_pills(self):
 		names = self.bridge.helix.snapshot_names
 		active = self.bridge.helix.current_snapshot
@@ -715,8 +765,10 @@ class MainWindow(QMainWindow):
 		return COLOR_HEX.get(color_name, "#3f454e")
 
 	def _on_slot_data_changed(self, slot_no, slot_info):
-		if slot_no in (HX_STOMP_INPUT_SLOT_INDEX, HX_STOMP_OUTPUT_SLOT_INDEX):
-			return
+		# Legacy HX Stomp path. HelixUsb.set_slot_info() is never called on the
+		# LT -- the block grid is fed by set_preset_layout() instead -- so this
+		# is unreachable. Left in place rather than ripped out, but inert.
+		return
 
 		display_slot_no = self._slot_index_map.get(slot_no)
 		if display_slot_no is None:
@@ -836,9 +888,10 @@ class MainWindow(QMainWindow):
 			self.module_name_list.setCurrentRow(selected_row)
 
 	def _set_selected_slot(self, slot_no, source):
-		if slot_no not in HX_STOMP_EFFECT_SLOT_INDICES:
-			return
-		self._selected_slot_no = slot_no
+		# Legacy HX Stomp path, no longer wired to anything. It called
+		# highlight_slot(), which writes to the device, so it must stay
+		# unreachable rather than merely unused.
+		return
 
 		if source == "ui":
 			try:
