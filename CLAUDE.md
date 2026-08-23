@@ -97,11 +97,32 @@ on every LT preset and kill `modes/request_preset` in a worker thread — three
 tracebacks per startup. All 15 preset captures now parse, and a live run logs
 real blocks (`Volume Pedal`, `Scream 808`, `WhoWatt 100`) with zero tracebacks.
 
+**Snapshot names parse (2026-08-23).** Each of the LT's eight snapshots is a
+fixed-size block — 625–633 bytes in the captures — opening with its name in the
+same `0xA1 + len` encoding used elsewhere:
+
+```
+04 <0xA1 + len> <ASCII>        (footswitch labels use prefix 05, no collision)
+```
+
+`HxPreset.extract_snapshot_names()` reads all eight. Confirmed against user-set
+names, not just the default template: preset 120 gives `lead`, `rhytm`;
+preset 96 gives `spring`, `dd`, `deluxe`.
+
+Eight blocks of ~628 bytes is most of the payload, which is why preset data is
+~7–10KB.
+
 Still broken in preset data:
 
-- **Snapshot detection is dead.** `modes/request_preset.py` looks for
-  `860600070208`, absent from all 15 LT captures. It also only tests for
-  snapshots 1–3; the LT has 8.
+- **The active snapshot is still unknown.** The Stomp reads it from
+  `8606 0N 07 02 08`; that exact sequence is absent, but every LT capture has
+  exactly one `8606` record reading `8606 <A> 07 00 08 <B> 09 28 0a 98 89`.
+  Byte `A` sits where the Stomp's index sits and varies 0–2 across captures,
+  so it is the prime candidate — **unconfirmed**, and byte `B` also varies
+  independently. Settle it by capturing one preset at two different snapshots.
+  Separately, live snapshot tracking needs a message we have never captured;
+  preset data only records what was saved. Also, the existing code handles
+  only snapshots 1–3 against the LT's 8.
 - **`FootSwitchInfo` yields empty objects.** Section extraction is correct and
   the labels are in the bytes (`Kinky Boost`, `6 Switch Looper`), but the
   field parser populates no attributes, so nothing surfaces. Next layer down.

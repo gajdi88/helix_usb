@@ -191,5 +191,55 @@ class LtSectionMarkersTest(unittest.TestCase):
         self.assertIn('Deluxe Comp', joined)
 
 
+class SnapshotNamesTest(unittest.TestCase):
+    """Snapshot names, stored as 04 <0xA1+len> <ascii>.
+
+    The LT holds eight snapshots against the HX Stomp's three, and each is a
+    fixed-size block opening with its name.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.caps = {os.path.basename(p): replay_preset_data(p) for p in preset_fixture_paths()}
+        if not cls.caps:
+            raise unittest.SkipTest('no preset-data fixtures')
+
+    def test_every_capture_yields_eight(self):
+        for name, r in self.caps.items():
+            with self.subTest(fixture=name):
+                self.assertEqual(8, len(r.hx_preset.snapshot_names))
+
+    def test_names_are_plausible_strings(self):
+        for name, r in self.caps.items():
+            for idx, snap in enumerate(r.hx_preset.snapshot_names):
+                with self.subTest(fixture=name, snapshot=idx):
+                    self.assertTrue(snap)
+                    self.assertTrue(all(32 <= ord(c) <= 126 for c in snap))
+
+    def test_custom_names_decode(self):
+        """The real proof: user-set names, not the default template.
+
+        If the parser were matching a fixed pattern rather than reading the
+        stored strings, these would come back as SNAPSHOT 1/2/3.
+        """
+        self.assertEqual(['lead', 'rhytm'],
+                         self.caps['sl2_preset120.jsonl'].hx_preset.snapshot_names[:2])
+        self.assertEqual(['spring', 'dd', 'deluxe'],
+                         self.caps['sl2_preset096.jsonl'].hx_preset.snapshot_names[:3])
+
+    def test_untouched_snapshots_keep_default_names(self):
+        empty = self.caps['sl3_preset127_empty.jsonl'].hx_preset.snapshot_names
+        self.assertEqual(['SNAPSHOT %d' % i for i in range(1, 9)], empty)
+
+    def test_snapshot_prefix_does_not_collide_with_footswitch_labels(self):
+        # Snapshot names use prefix 0x04, footswitch labels 0x05.
+        r = self.caps['sl2_preset120.jsonl']
+        fs_blob = b''.join(HxPreset.extract_footswitch_sections(r.hex_str))
+        for snap in ('lead', 'rhytm'):
+            self.assertNotIn(snap.encode(), fs_blob)
+        for label in (b'Kinky Boost', b'6 Switch Looper'):
+            self.assertIn(label, fs_blob)
+
+
 if __name__ == '__main__':
     unittest.main()

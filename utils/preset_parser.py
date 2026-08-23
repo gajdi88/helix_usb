@@ -514,6 +514,7 @@ class HxPreset:
         self.data_in = data_in
         self.switch_info = []
         self.slot_info = []
+        self.snapshot_names = []
         self.preset_no = preset_no
         self.preset_name = preset_name
         self._parse()
@@ -521,6 +522,7 @@ class HxPreset:
     def _parse(self):
         self.switch_info = []
         self.slot_info = []
+        self.snapshot_names = self.extract_snapshot_names(self.data_in)
 
         # switch infos
         fs_info_data = self.extract_footswitch_sections(self.data_in)
@@ -568,6 +570,41 @@ class HxPreset:
         ('0895', '049a'),   # HX Stomp
         ('089d', '04dc'),   # Helix LT
     )
+
+    # The Helix LT stores eight snapshots; the HX Stomp three.
+    SNAPSHOT_COUNT = 8
+    SNAPSHOT_NAME_PREFIX = 0x04
+
+    @staticmethod
+    def extract_snapshot_names(data):
+        """Snapshot names, in device order.
+
+        Each snapshot is a fixed-size block -- 625 to 633 bytes across the
+        captures -- opening with its name in the same `0xA1 + len` string
+        encoding used by preset names and footswitch labels:
+
+            04 <0xA1 + len> <ASCII>
+
+        Footswitch labels use prefix 0x05, so the two do not collide. All 15
+        Helix LT captures yield exactly eight names, evenly spaced.
+        """
+        raw = bytes.fromhex(data)
+        names = []
+        i = 0
+        while i < len(raw) - 2:
+            if raw[i] == HxPreset.SNAPSHOT_NAME_PREFIX and 0xa1 < raw[i + 1] < 0xc0:
+                length = raw[i + 1] - 0xa1
+                text = raw[i + 2:i + 2 + length]
+                if len(text) == length and all(32 <= c <= 126 for c in text):
+                    names.append(text.decode('ascii'))
+                    i += 2 + length
+                    continue
+            i += 1
+
+        if len(names) != HxPreset.SNAPSHOT_COUNT:
+            log.warning('Expected %d snapshot names, found %d: %s',
+                        HxPreset.SNAPSHOT_COUNT, len(names), names)
+        return names
 
     @staticmethod
     def _find_aligned(data, marker, start=0):
@@ -718,6 +755,12 @@ class HxPreset:
             print(beauty_str)
 
         print("")
+        if self.snapshot_names:
+            print()
+            print("Snapshots: ")
+            for idx, name in enumerate(self.snapshot_names, start=1):
+                print('[{}]: {}'.format(idx, name))
+
         print("Switches: ")
         for i in range(0, 5):
             for j, child in enumerate(self.switch_info[i].children):
