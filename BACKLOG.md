@@ -5,6 +5,64 @@ protocol facts live in `CLAUDE.md`; this file is for what is *not* done yet.
 
 ## In progress — picking up here
 
+### Display order is not readable — the preset numbering problem
+
+**The problem.** Two different preset numberings exist and we can only read
+one of them.
+
+- The name enumeration returns names against a **storage index**
+  (`0x81 0xCD`, absolute across the device).
+- MIDI Program Change and the `0x6C` tag use **display position** — the slot
+  the device actually shows, e.g. `07B`.
+
+They are identical until a preset is moved, and then they diverge. On this
+device `TwoPrinces` was moved to the end of setlist 3, so display position is
+storage index − 1 for everything from storage 26 to 125.
+
+Proved in `tests/fixtures/live/program_change_25.jsonl`: Program Change 25
+loads `A30 Fawn Brt` and the device reports preset 25, while the enumeration
+lists `TwoPrinces` at storage 25.
+
+**Why it matters.** Every preset-data capture was selected by Program Change
+(display) and then labelled from the enumeration (storage), so
+`preset_name` on `tests/fixtures/presets/sl2_preset*.jsonl` is wrong for
+anything after the move — they are flagged `preset_name_reliable: false`. It
+also means any preset reference given to the operator is wrong unless it came
+from a Program Change number.
+
+**What upstream did, and why it does not help directly.** The HX Stomp
+version of `_extract_record_preset_index()` ignored `0x81` entirely. It looked
+inside each record for `0x6B` and `0x6C` and computed
+`index = idx_6b * 25 + idx_6c` — bank and offset, i.e. display coordinates.
+This fork replaced that with the `0x81 0xCD` read when adding LT support,
+which is where the storage index came from.
+
+The LT's records simply do not contain those fields. A full record is:
+
+```
+81 cd <abs>   84 cd 00   6d <0xA1+len> <name>   00 7b c2 7c c2 7d 00
+```
+
+`0x84 0xCD` is constant `0` in all 1024 records across the eight setlists, and
+the trailer is byte-identical in 1018 of them (the other six are artefacts of
+splitting at packet boundaries). There is nowhere for a display index to hide.
+
+**Leads, in order of cheapness.**
+
+1. `modes/request_preset_names.py` carries two commented-out request arrays
+   inherited from upstream — alternative queries that were presumably tried
+   against the Stomp. They may return a different record shape that includes
+   `0x6B`/`0x6C`. Costs one capture each.
+2. Capture HX Edit talking to the LT in the Windows VM while it renders the
+   preset list. It must obtain display order somehow.
+3. Ask upstream whether the Stomp's `0x6B`/`0x6C` record fields have a known
+   LT equivalent.
+
+**Workaround if it stays unsolved.** Display order can be measured by sending
+Program Change 0-127 and reading back each name, roughly 128 x 3s. Slow, but
+it produces a real storage-to-display map, and it only needs redoing when
+presets are moved.
+
 ### Block parsing: plan as of 2026-08-23
 
 Layout is **confirmed** against the device (see CLAUDE.md). What follows is
